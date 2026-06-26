@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+body { @apply bg-slate-950 text-slate-200 antialiased; }
+
+/* Scrollbar tối */
+* { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: #334155; border-radius: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* Placeholder + autofill cho input nền tối */
+input::placeholder, textarea::placeholder { @apply text-slate-500; }

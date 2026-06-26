@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<title>Shope Control — Ảnh quảng cáo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;700;800&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Be Vietnam Pro', system-ui, sans-serif; }
+  body { background: #0b1020; color: #e8ecf6; padding: 40px; display: flex; flex-direction: column; gap: 40px; align-items: center; }
+  .hint { color: #8a93a8; font-size: 14px; max-width: 1200px; }
+  .hint b { color: #ffb088; }
+
+  /* khung nền chung */
+  .ad { position: relative; overflow: hidden; color: #eaf0fb;
+        background: radial-gradient(1200px 600px at 80% -10%, #2a1c4a 0%, transparent 60%),
+                    radial-gradient(900px 500px at -10% 110%, #3a1a12 0%, transparent 55%),
+                    linear-gradient(135deg, #0d1326 0%, #0a0f1f 100%); }
+  .ad::after { content:''; position:absolute; inset:0; background:
+        radial-gradient(2px 2px at 20% 30%, #ffffff22, transparent),
+        radial-gradient(2px 2px at 70% 60%, #ffffff18, transparent),
+        radial-gradient(1px 1px at 40% 80%, #ffffff22, transparent); }
+  .brandrow { display:flex; align-items:center; gap:16px; }
+  .logo { display:grid; place-items:center; border-radius:18px;
+          background:linear-gradient(135deg,#ff7a3d,#e8431f); box-shadow:0 10px 30px #ee4d2d55; }
+  .brand-name { font-weight:800; letter-spacing:-.5px; }
+  .brand-sub { color:#9fb0d0; }
+  .headline { font-weight:800; letter-spacing:-1px; line-height:1.08; }
+  .headline .hi { background:linear-gradient(90deg,#ff9a5a,#ff5e3a); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .pill { display:inline-flex; align-items:center; gap:8px; background:#ffffff10; border:1px solid #ffffff22;
+          border-radius:999px; color:#cfe0ff; backdrop-filter: blur(4px); }
+  .feat { display:flex; align-items:flex-start; gap:14px; }
+  .ic { flex:0 0 auto; display:grid; place-items:center; border-radius:14px; background:#ffffff0e; border:1px solid #ffffff1c; }
+  .feat .ft { font-weight:700; }
+  .feat .fd { color:#9fb0d0; }
+  .cta { display:inline-flex; align-items:center; gap:10px; font-weight:800; color:#1a1206;
+         background:linear-gradient(90deg,#ffb15a,#ff7a3d); border-radius:999px; box-shadow:0 12px 30px #ff7a3d44; }
+  .safe { color:#7fe0b0; font-weight:700; }
+  .glow { position:absolute; border-radius:50%; filter:blur(60px); opacity:.5; }
+
+  /* ===== FEED 1200×628 ===== */
+  #feed { width:1200px; height:628px; border-radius:24px; padding:56px 60px; display:flex; flex-direction:column; }
+  #feed .brandrow { margin-bottom:26px; }
+  #feed .logo { width:60px; height:60px; font-size:32px; }
+  #feed .brand-name { font-size:26px; }
+  #feed .brand-sub { font-size:14px; }
+  #feed .headline { font-size:52px; max-width:760px; }
+  #feed .sub { margin-top:16px; color:#b9c6e6; font-size:20px; max-width:680px; }
+  #feed .feats { margin-top:30px; display:grid; grid-template-columns:1fr 1fr; gap:18px 40px; max-width:900px; }
+  #feed .ic { width:42px; height:42px; font-size:22px; }
+  #feed .feat .ft { font-size:18px; }
+  #feed .feat .fd { font-size:13.5px; }
+  #feed .bottom { margin-top:auto; display:flex; align-items:center; justify-content:space-between; }
+  #feed .cta { font-size:20px; padding:16px 30px; }
+  #feed .g1 { width:380px; height:380px; background:#ff5e3a; right:-90px; top:-90px; }
+  #feed .g2 { width:300px; height:300px; background:#6d3cff; left:-80px; bottom:-120px; }
+
+  /* ===== SQUARE 1080×1080 ===== */
+  #sq { width:1080px; height:1080px; border-radius:28px; padding:80px 70px; display:flex; flex-direction:column; }
+  #sq .brandrow { margin-bottom:40px; }
+  #sq .logo { width:74px; height:74px; font-size:40px; }
+  #sq .brand-name { font-size:34px; }
+  #sq .brand-sub { font-size:17px; }
+  #sq .headline { font-size:72px; }
+  #sq .sub { margin-top:22px; color:#b9c6e6; font-size:26px; max-width:840px; }
+  #sq .feats { margin-top:46px; display:flex; flex-direction:column; gap:26px; }
+  #sq .ic { width:54px; height:54px; font-size:28px; }
+  #sq .feat .ft { font-size:24px; }
+  #sq .feat .fd { font-size:17px; margin-top:2px; }
+  #sq .bottom { margin-top:auto; display:flex; align-items:center; gap:24px; }
+  #sq .cta { font-size:26px; padding:20px 40px; }
+  #sq .pill { font-size:18px; padding:10px 18px; }
+  #sq .g1 { width:520px; height:520px; background:#ff5e3a; right:-140px; top:-140px; }
+  #sq .g2 { width:420px; height:420px; background:#6d3cff; left:-120px; bottom:-160px; }
+</style>
+</head>
+<body>
+
+  <div class="hint">Mở file này trong Chrome → bấm F12 → ở tab <b>Elements</b> chuột phải vào thẻ <b>&lt;div id="feed"&gt;</b> (hoặc <b>#sq</b>) → <b>Capture node screenshot</b> → ra ảnh PNG đúng kích thước. (Hoặc dùng công cụ chụp màn hình vùng.)</div>
+
+  <!-- FEED 1200x628 -->
+  <div id="feed" class="ad">
+    <div class="glow g1"></div><div class="glow g2"></div>
+    <div class="brandrow">
+      <div class="logo">🛒</div>
+      <div><div class="brand-name">Shope Control</div><div class="brand-sub">Trợ lý rải link Shopee bằng AI</div></div>
+    </div>
+    <div class="headline">Tự động <span class="hi">tìm nhóm &amp; comment</span> rải link Shopee bằng AI</div>
+    <div class="sub">Tìm đúng nhóm tiềm năng → AI đọc bài → tự soạn comment tự nhiên kèm link affiliate. An toàn, có kiểm soát.</div>
+    <div class="feats">
+      <div class="feat"><div class="ic">🔎</div><div><div class="ft">Tìm nhóm theo niche</div><div class="fd">AI gợi ý từ khoá, chấm điểm nhóm hợp sản phẩm</div></div></div>
+      <div class="feat"><div class="ic">🎯</div><div><div class="ft">Lọc bài tiềm năng</div><div class="fd">Chỉ comment bài đang cần mua / hỏi sản phẩm</div></div></div>
+      <div class="feat"><div class="ic">🤖</div><div><div class="ft">AI soạn comment</div><div class="fd">Câu chữ tự nhiên, chèn link Shopee hoa hồng</div></div></div>
+      <div class="feat"><div class="ic">🛡️</div><div><div class="ft">An toàn tài khoản</div><div class="fd">Giới hạn/ngày, delay, duyệt tay, chống trùng</div></div></div>
+    </div>
+    <div class="bottom">
+      <div class="cta">Cài đặt &amp; dùng thử ngay →</div>
+      <div class="pill">⚡ Claude · OpenAI · Gemini</div>
+    </div>
+  </div>
+
+  <!-- SQUARE 1080x1080 -->
+  <div id="sq" class="ad">
+    <div class="glow g1"></div><div class="glow g2"></div>
+    <div class="brandrow">
+      <div class="logo">🛒</div>
+      <div><div class="brand-name">Shope Control</div><div class="brand-sub">Trợ lý rải link Shopee bằng AI</div></div>
+    </div>
+    <div class="headline">Rải link Shopee<br/><span class="hi">tự động bằng AI</span></div>
+    <div class="sub">Tìm nhóm tiềm năng → đọc bài → comment đúng nhu cầu, kèm link hoa hồng. Bạn chỉ việc duyệt.</div>
+    <div class="feats">
+      <div class="feat"><div class="ic">🔎</div><div><div class="ft">Tìm &amp; tham gia nhóm tiềm năng</div><div class="fd">AI gợi ý niche + chấm điểm + tham gia hàng loạt</div></div></div>
+      <div class="feat"><div class="ic">🎯</div><div><div class="ft">Quét bài → lọc bài tiềm năng</div><div class="fd">AI đọc feed, chỉ chọn bài đang muốn mua</div></div></div>
+      <div class="feat"><div class="ic">🤖</div><div><div class="ft">AI tự soạn comment + link</div><div class="fd">Tự nhiên như người thật, chèn link Shopee</div></div></div>
+      <div class="feat"><div class="ic">🛡️</div><div><div class="ft">An toàn &amp; theo dõi realtime</div><div class="fd">Giới hạn/ngày · delay · duyệt tay · nhật ký + lịch sử</div></div></div>
+    </div>
+    <div class="bottom">
+      <div class="cta">Dùng thử ngay →</div>
+      <div class="pill">⚡ Claude · OpenAI · Gemini</div>
+    </div>
+  </div>
+
+</body>
+</html>
