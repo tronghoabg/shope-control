@@ -49,27 +49,29 @@ export function ShopeProvider({ children }) {
     }
   }, [connected, connectFb])
 
-  // TỰ liên kết tài khoản: /app cùng origin web → có session cookie → lấy token tự động (khỏi dán tay)
-  const triedLink = useRef(false)
-  const linkAccount = useCallback(async () => {
-    try {
-      const r = await fetch('/api/me', { credentials: 'include' })
-      const me = r.ok ? await r.json() : { loggedIn: false }
-      setAccount(me)
-      if (me.loggedIn && me.apiToken) {
-        const st = await ext({ type: 'GET_STATE' })
-        if (st?.cfg?.licenseToken !== me.apiToken) {
-          await ext({ type: 'SET_CFG', cfg: { licenseToken: me.apiToken, webBase: window.location.origin } })
-        }
-        await ext({ type: 'CHECK_LICENSE' })
-        refresh()
-      }
-    } catch { setAccount({ loggedIn: false }) }
-  }, [refresh])
+  // Nạp tài khoản web NGAY khi mở (không phụ thuộc extension) → ô tài khoản không kẹt "Đang tải".
+  const refreshAccount = useCallback(() => {
+    fetch('/api/me', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : { loggedIn: false })
+      .then(setAccount)
+      .catch(() => setAccount({ loggedIn: false }))
+  }, [])
+  useEffect(() => { refreshAccount() }, [refreshAccount])
 
+  // Tự liên kết extension khi đã kết nối + đã đăng nhập (không cần dán token)
+  const linkedRef = useRef(false)
   useEffect(() => {
-    if (connected && !triedLink.current) { triedLink.current = true; linkAccount() }
-  }, [connected, linkAccount])
+    if (!connected || linkedRef.current || !account?.loggedIn || !account.apiToken) return
+    linkedRef.current = true
+    ;(async () => {
+      const st = await ext({ type: 'GET_STATE' })
+      if (st?.cfg?.licenseToken !== account.apiToken) {
+        await ext({ type: 'SET_CFG', cfg: { licenseToken: account.apiToken, webBase: window.location.origin } })
+      }
+      await ext({ type: 'CHECK_LICENSE' })
+      refresh()
+    })()
+  }, [connected, account, refresh])
 
   const call = useCallback(async (payload, { okMsg, errMsg, timeout } = {}) => {
     const r = await ext(payload, timeout)
@@ -87,7 +89,7 @@ export function ShopeProvider({ children }) {
   const provider = s?.cfg?.provider || 'anthropic'
   const hasKey = !!((s?.cfg?.apiKeys || {})[provider] || '').trim()
 
-  const value = { s, connected, hasKey, account, refresh, connectFb, call, setCfg, notify, toasts, linkAccount }
+  const value = { s, connected, hasKey, account, refresh, refreshAccount, connectFb, call, setCfg, notify, toasts }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
