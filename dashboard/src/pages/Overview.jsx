@@ -82,14 +82,20 @@ export default function Overview({ goto }) {
 
       <LiveProgress progress={s.progress} />
 
-      {/* Hướng dẫn bắt đầu */}
-      <Section title={allDone ? '✅ Đã sẵn sàng — bật Auto hoặc duyệt hàng chờ' : '🚀 Bắt đầu từ đây'}>
-        <div className="space-y-2">
-          {rawSteps.map((st, i) => (
-            <Step key={st.key} n={i + 1} done={st.done} current={i === firstUndone} title={st.title} desc={st.desc} action={st.action} />
-          ))}
-        </div>
-      </Section>
+      {/* Hướng dẫn bắt đầu — gập gọn khi đã hoàn tất */}
+      {allDone ? (
+        <Section title="✅ Đã sẵn sàng">
+          <p className="text-sm text-slate-300">Đã thiết lập xong các bước. Dùng <b>Điều khiển</b> bên dưới để <b>Quét bài</b> / <b>Bật Auto</b>, hoặc sang <b>Hàng chờ duyệt</b> để duyệt &amp; đăng.</p>
+        </Section>
+      ) : (
+        <Section title="🚀 Bắt đầu từ đây">
+          <div className="space-y-2">
+            {rawSteps.map((st, i) => (
+              <Step key={st.key} n={i + 1} done={st.done} current={i === firstUndone} title={st.title} desc={st.desc} action={st.action} />
+            ))}
+          </div>
+        </Section>
+      )}
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat label="Trạng thái" value={cfg.killSwitch ? 'KILL' : running ? 'Đang chạy' : 'Tắt'} icon={IconRobot} color={cfg.killSwitch ? 'red' : running ? 'green' : 'gray'} />
@@ -98,23 +104,13 @@ export default function Overview({ goto }) {
         <Stat label="Hàng chờ" value={queue.length} icon={IconListNumbers} color="orange" />
       </div>
 
-      <Card className="p-4">
-        <div className="mb-2 flex items-center justify-between text-sm">
-          <span className="text-slate-300">Hạn mức hôm nay</span>
-          <span className="text-slate-400">{state.doneToday}/{cfg.dailyCap} comment</span>
-        </div>
-        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
-          <div className={`h-full rounded-full transition-all duration-500 ${state.doneToday >= cfg.dailyCap ? 'bg-red-500' : 'bg-emerald-500'}`}
-            style={{ width: `${Math.min(100, Math.round((state.doneToday / Math.max(1, cfg.dailyCap)) * 100))}%` }} />
-        </div>
-      </Card>
-
       <Section title="Điều khiển">
         <div className="flex flex-wrap items-center gap-2">
           <Btn variant="success" icon={IconPlayerPlay} disabled={running} onClick={() => call({ type: 'START_AUTO' }, { okMsg: 'Đã bật Auto', errMsg: 'Không bật được' })}>Bật Auto</Btn>
           <Btn icon={IconPlayerStop} onClick={() => call({ type: 'STOP_AUTO' }, { okMsg: 'Đã tắt' })}>Tắt</Btn>
           <Btn variant="danger" icon={IconHandStop} onClick={() => call({ type: 'KILL' }, { okMsg: 'Đã DỪNG NGAY' })}>DỪNG NGAY</Btn>
           <div className="ml-auto flex flex-wrap gap-2">
+            {queue.length > 0 && <Btn variant="success" icon={IconChecks} onClick={() => goto('queue')}>Duyệt hàng chờ ({queue.length})</Btn>}
             <Btn variant="primary" icon={IconRadar} onClick={() => call({ type: 'SCAN_NOW' }, { okMsg: 'Đã quét', timeout: 120000 })}>Quét thử nhóm</Btn>
             <Btn icon={IconSend} onClick={() => call({ type: 'STEP_NOW' }, { okMsg: 'Đã đăng 1 comment', timeout: 60000 })}>Đăng 1 comment</Btn>
             <Btn variant="ghost" icon={IconTrash} onClick={() => call({ type: 'RESET_HISTORY' }, { okMsg: 'Đã xoá lịch sử' })}>Xoá lịch sử</Btn>

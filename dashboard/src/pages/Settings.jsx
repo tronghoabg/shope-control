@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { IconExternalLink, IconTestPipe, IconDeviceFloppy, IconKey } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
-import { Section, Btn, Field, Input, Select, Badge } from '../ui.jsx'
+import { Section, Btn, Field, Input, Select, Badge, Hint } from '../ui.jsx'
 
 const PROV = {
   anthropic: {
@@ -62,6 +62,11 @@ export default function Settings() {
   return (
     <div className="max-w-2xl space-y-5">
       <h1 className="text-xl font-bold text-slate-100">Cài đặt API</h1>
+
+      <Hint id="settings">
+        Tool cần AI để đọc &amp; đánh giá nhóm/bài. <b>1)</b> Chọn <b>Provider</b> (Claude/OpenAI/Gemini) → bấm <b>Lấy API key</b> để tạo key.
+        {' '}<b>2)</b> Dán key → <b>Test</b> (phải ra ✅). <b>3)</b> Chọn <b>Model</b> (loại rẻ/nhanh là đủ) → <b>Lưu cài đặt</b>.
+      </Hint>
 
       {!hasKey && (
         <div className="flex items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-300">

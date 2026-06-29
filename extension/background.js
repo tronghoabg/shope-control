@@ -202,42 +202,74 @@ async function connectFb() {
   return conn;
 }
 
+// Chờ 1 tab load xong (status='complete'); trả false nếu tab biến mất.
+async function waitTabComplete(tabId, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let t; try { t = await chrome.tabs.get(tabId); } catch { return false; }
+    if (t && t.status === 'complete') return true;
+    await new Promise(r => setTimeout(r, 400));
+  }
+  return true;
+}
+
 // Tìm tab facebook.com đang mở, hoặc tự tạo tab NỀN + GHIM nếu chưa có (đăng nhập sẵn qua cookie).
 async function getFbTab() {
   const existing = await chrome.tabs.query({ url: ['https://www.facebook.com/*', 'https://web.facebook.com/*'] });
   const cur = (existing || []).find(t => t.id != null);
   if (cur) return cur.id;
   const saved = (await chrome.storage.session.get('fbTabId')).fbTabId;
-  if (saved != null) { try { const t = await chrome.tabs.get(saved); if (t && t.id != null) return t.id; } catch {} }
+  if (saved != null) {
+    try { const t = await chrome.tabs.get(saved); if (t && t.id != null) return t.id; } catch {}
+    await chrome.storage.session.remove('fbTabId');   // id cũ đã chết → xoá
+  }
   const created = await chrome.tabs.create({ url: 'https://www.facebook.com/', active: false, pinned: true });
   await chrome.storage.session.set({ fbTabId: created.id });
-  await new Promise(r => setTimeout(r, 6000));   // chờ FB load + content script inject + bơm creds
+  await waitTabComplete(created.id);
+  await new Promise(r => setTimeout(r, 1500));   // thêm chút cho content script inject + bơm creds
   return created.id;
 }
 
-// ─── Chạy fetch TRONG tab facebook.com thật (an toàn checkpoint) ──────────────
-async function runFetchInFbTab(url, method, body, headers) {
-  const tabId = await getFbTab();
-  // Ưu tiên content script; fallback executeScript nếu chưa inject
+// 1 lần fetch trong tab: thử content script, fallback executeScript.
+async function fbTabFetchOnce(tabId, url, method, body, headers) {
   try {
     const res = await chrome.tabs.sendMessage(tabId, { type: 'SHOPE_FETCH', url, method, body, headers });
     if (res?.ok) return res.data;
     if (res?.error) throw new Error(res.error);
-  } catch (e) {
-    const inj = await chrome.scripting.executeScript({
-      target: { tabId },
-      world: 'ISOLATED',
-      args: [url, method, body || '', headers || {}],
-      func: async (u, m, b, h) => {
-        try {
-          const r = await fetch(u, { method: m, credentials: 'include', headers: h, body: m !== 'GET' ? b : undefined });
-          return { ok: true, data: await r.text() };
-        } catch (err) { return { ok: false, error: String(err?.message || err) }; }
-      },
-    });
-    const r = inj?.[0]?.result;
-    if (r?.ok) return r.data;
-    throw new Error(r?.error || 'tab_fetch_failed');
+  } catch (e) { /* content script chưa sẵn → dùng executeScript */ }
+  const inj = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: 'ISOLATED',
+    args: [url, method, body || '', headers || {}],
+    func: async (u, m, b, h) => {
+      try {
+        const r = await fetch(u, { method: m, credentials: 'include', headers: h, body: m !== 'GET' ? b : undefined });
+        return { ok: true, data: await r.text() };
+      } catch (err) { return { ok: false, error: String(err?.message || err) }; }
+    },
+  });
+  const r = inj?.[0]?.result;
+  if (r?.ok) return r.data;
+  throw new Error(r?.error || 'tab_fetch_failed');
+}
+
+// ─── Chạy fetch TRONG tab facebook.com thật (an toàn checkpoint) ──────────────
+// Tab chết giữa chừng (No tab with id…) → xoá cache, tạo tab mới, thử lại 1 lần.
+async function runFetchInFbTab(url, method, body, headers) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const tabId = await getFbTab();
+    try {
+      return await fbTabFetchOnce(tabId, url, method, body, headers);
+    } catch (e) {
+      const msg = String(e?.message || e);
+      const tabDead = /No tab with id|No frame|Frame with ID|No window|cannot be scripted|cannot access|The tab was closed/i.test(msg);
+      if (attempt === 0 && tabDead) {
+        await chrome.storage.session.remove('fbTabId');
+        await new Promise(r => setTimeout(r, 500));
+        continue;
+      }
+      throw e;
+    }
   }
   throw new Error('tab_fetch_failed');
 }
@@ -378,15 +410,14 @@ function mapLinkResult(x) {
   return { ok: true, shortLink: x.shortLink, longLink: x.longLink || '' };
 }
 
-// BATCH qua SW (headless): cookie phiên + csrf-token (chrome.cookies) + Origin/Referer do DNR gắn.
+// BATCH qua SW (headless): cookie phiên gửi kèm credentials:include, Origin/Referer do DNR gắn.
+// Không đọc cookie qua API (khỏi cần quyền 'cookies') — csrftoken vẫn đi tự động dạng cookie.
 // Trả mảng raw [{shortLink,longLink,failCode}] hoặc ném lỗi (để caller fallback qua tab).
 async function affBatchSW(linkParams) {
-  let csrf = '';
-  try { const c = await chrome.cookies.get({ url: 'https://affiliate.shopee.vn', name: 'csrftoken' }); csrf = c?.value || ''; } catch {}
   const body = { operationName: 'batchGetCustomLink', query: AFF_GQL_QUERY, variables: { linkParams, sourceCaller: 'CUSTOM_LINK_CALLER' } };
   const r = await fetch(AFF_GQL_URL, {
     method: 'POST', credentials: 'include',
-    headers: { 'accept': 'application/json, text/plain, */*', 'content-type': 'application/json; charset=UTF-8', 'affiliate-program-type': '1', ...(csrf ? { 'csrf-token': csrf } : {}) },
+    headers: { 'accept': 'application/json, text/plain, */*', 'content-type': 'application/json; charset=UTF-8', 'affiliate-program-type': '1' },
     body: JSON.stringify(body),
   });
   const txt = await r.text();

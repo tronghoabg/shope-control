@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { IconUpload, IconFileImport } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
-import { Section, Btn, Textarea, Badge, Card, Empty } from '../ui.jsx'
+import { Section, Btn, Textarea, Badge, Card, Empty, Hint } from '../ui.jsx'
 
 const SAMPLE = `id,name,keywords,category,price,link
 sp001,Tai nghe Bluetooth chống ồn,"tai nghe,bluetooth,nghe nhạc",Phụ kiện,299000,https://shopee.vn/...
@@ -11,6 +11,8 @@ export default function Catalog() {
   const { s, call } = useShope()
   const [csv, setCsv] = useState('')
   const catalog = s?.catalog || []
+  const cfg = s?.cfg || {}
+  const needed = (cfg.mode || 'affiliate') === 'affiliate' && (cfg.productSource || 'catalog') === 'catalog'
 
   return (
     <div className="space-y-5">
@@ -18,6 +20,17 @@ export default function Catalog() {
         <h1 className="text-xl font-bold text-slate-100">Catalog sản phẩm</h1>
         <Badge color="indigo">{catalog.length} sản phẩm</Badge>
       </div>
+
+      <Hint id="catalog">
+        Danh sách sản phẩm để AI chọn link khớp bài (dùng cho chế độ <b>Rải link + nguồn Catalog CSV</b>).
+        Dán CSV theo cột <code className="rounded bg-slate-800 px-1 text-slate-300">id,name,keywords,category,price,link</code> rồi bấm <b>Nhập catalog</b>. Bấm <b>Dán mẫu</b> để xem ví dụ.
+      </Hint>
+
+      {!needed && (
+        <div className="rounded-xl border border-slate-700 bg-slate-800/40 p-3 text-sm text-slate-400">
+          Chế độ hiện tại <b>không dùng catalog</b> ({(cfg.mode || 'affiliate') === 'social' ? 'Comment dạo' : 'nguồn Shopee tự động'}). Catalog chỉ cần cho <b>Rải link + nguồn Catalog CSV</b>.
+        </div>
+      )}
 
       <Section title="Nhập CSV">
         <Textarea rows={5} placeholder={SAMPLE} value={csv} onChange={(e) => setCsv(e.target.value)} className="font-mono text-xs" />

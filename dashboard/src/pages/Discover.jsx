@@ -1,10 +1,10 @@
 import { useState, useRef } from 'react'
 import {
   IconSparkles, IconSearch, IconPlus, IconCheck, IconExternalLink, IconCompass,
-  IconStarFilled, IconUsersPlus, IconPlayerStop,
+  IconStarFilled, IconUsersPlus, IconPlayerStop, IconTarget,
 } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
-import { Section, Btn, Badge, Input, Card, Empty, Spinner } from '../ui.jsx'
+import { Section, Btn, Badge, Input, Card, Empty, Spinner, Hint } from '../ui.jsx'
 import { ext } from '../ext.js'
 
 const scoreColor = (s) => s == null ? 'gray' : s >= 70 ? 'green' : s >= 40 ? 'yellow' : 'red'
@@ -34,6 +34,10 @@ export default function Discover() {
 
   const results = s?.searchResults || []
   const joinable = results.filter(g => !g.joined)
+  const targets = s?.cfg?.groupIds || []
+  const targetSet = new Set(targets)
+  const setTargets = (ids) => call({ type: 'SET_TARGETS', groupIds: [...new Set(ids)] })
+  const joinedNotTargeted = results.filter(g => g.joined && !targetSet.has(g.groupId)).length
 
   const suggest = async () => {
     setSuggesting(true)
@@ -90,9 +94,21 @@ export default function Discover() {
     <div className="space-y-5">
       <h1 className="text-xl font-bold text-slate-100">Khám phá nhóm mới</h1>
 
+      <Hint id="discover">
+        Tìm nhóm đúng niche để rải link. <b>1)</b> Bấm <b>AI gợi ý từ khoá</b> (hoặc gõ từ khoá) → <b>Tìm</b>.
+        {' '}<b>2)</b> Chọn nhóm điểm cao → <b>Tham gia</b> (tick nhiều nhóm → <b>Tham gia N nhóm</b> có giãn cách).
+        {' '}<b>3)</b> Nhóm đã tham gia bấm <b>+ Mục tiêu</b> để tool rải link/comment vào đó.
+      </Hint>
+
       {!hasKey && (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-300">
           Cần nhập API key (trang Cài đặt) để AI gợi ý &amp; chấm điểm nhóm.
+        </div>
+      )}
+
+      {joinedNotTargeted > 0 && (
+        <div className="rounded-xl border border-indigo-500/40 bg-indigo-500/10 p-3 text-sm text-indigo-200">
+          Bạn đã tham gia <b>{joinedNotTargeted}</b> nhóm chưa đặt mục tiêu. Bấm <b>+ Mục tiêu</b> ở nhóm để tool rải link/comment vào đó.
         </div>
       )}
 
@@ -180,9 +196,16 @@ export default function Discover() {
                       {g.reason ? ` · ${g.reason}` : ''}
                     </div>
                   </div>
-                  {g.joined
-                    ? <Badge color="green"><IconCheck size={13} /> đã tham gia</Badge>
-                    : <Btn size="sm" variant="primary" icon={IconPlus} loading={joiningId === g.groupId} disabled={!!bulk} onClick={(e) => { e.stopPropagation(); join(g) }}>Tham gia</Btn>}
+                  {g.joined ? (
+                    <div className="flex items-center gap-2">
+                      <Badge color="green"><IconCheck size={13} /> đã tham gia</Badge>
+                      {targetSet.has(g.groupId)
+                        ? <Btn size="sm" variant="success" icon={IconTarget} onClick={(e) => { e.stopPropagation(); setTargets(targets.filter(x => x !== g.groupId)) }}>✓ Mục tiêu</Btn>
+                        : <Btn size="sm" icon={IconTarget} onClick={(e) => { e.stopPropagation(); setTargets([...targets, g.groupId]) }}>+ Mục tiêu</Btn>}
+                    </div>
+                  ) : (
+                    <Btn size="sm" variant="primary" icon={IconPlus} loading={joiningId === g.groupId} disabled={!!bulk} onClick={(e) => { e.stopPropagation(); join(g) }}>Tham gia</Btn>
+                  )}
                 </div>
               )
             })}

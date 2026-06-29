@@ -20,7 +20,6 @@
     "tabs",
     "alarms",
     "notifications",
-    "cookies",
     "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [

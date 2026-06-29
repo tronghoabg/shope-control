@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { IconRadar2, IconExternalLink, IconStarFilled, IconUsersGroup, IconX, IconTarget } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
-import { Card, Btn, Badge, Empty } from '../ui.jsx'
+import { Card, Btn, Badge, Empty, Hint } from '../ui.jsx'
 
 const scoreColor = (s) => s == null ? 'gray' : s >= 70 ? 'green' : s >= 40 ? 'yellow' : 'red'
 const FILTERS = [{ k: 'all', l: 'Tất cả' }, { k: 'potential', l: 'Tiềm năng' }, { k: 'weak', l: 'Kém' }]
@@ -41,6 +41,11 @@ export default function Groups() {
         <h1 className="text-xl font-bold text-slate-100">Nhóm của tôi</h1>
         <Btn variant="primary" icon={IconRadar2} loading={scanning} disabled={!hasKey} onClick={scan}>Quét &amp; chấm điểm</Btn>
       </div>
+
+      <Hint id="groups">
+        Nhóm bạn <b>đã tham gia</b>. Bấm <b>Quét &amp; chấm điểm</b> để AI đánh giá nhóm nào hợp bán hàng,
+        rồi <b>tick nhóm</b> (hoặc <b>Chọn nhóm tốt</b>) để đưa vào <b>Nhóm mục tiêu</b> — tool chỉ rải link/comment ở các nhóm mục tiêu.
+      </Hint>
 
       {/* Quản lý mục tiêu */}
       <Card className="p-4">

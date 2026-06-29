@@ -1,7 +1,26 @@
 // Bộ UI primitive bằng Tailwind — dark thuần, nhất quán.
 import { useState } from 'react'
+import { IconInfoCircle, IconX } from '@tabler/icons-react'
 
 const cx = (...a) => a.filter(Boolean).join(' ')
+
+// Hộp hướng dẫn ngắn ở đầu trang — ẩn được, nhớ trạng thái theo id (localStorage).
+export function Hint({ id, title = 'Hướng dẫn', children }) {
+  const key = 'shope_hint_' + id
+  const [hidden, setHidden] = useState(() => { try { return localStorage.getItem(key) === '1' } catch { return false } })
+  if (hidden) return null
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-sky-500/30 bg-sky-500/[0.07] p-3 text-sm text-sky-100/90">
+      <IconInfoCircle size={18} className="mt-0.5 shrink-0 text-sky-400" />
+      <div className="flex-1 leading-relaxed">
+        <div className="mb-0.5 font-semibold text-sky-200">{title}</div>
+        {children}
+      </div>
+      <button title="Ẩn hướng dẫn" onClick={() => { try { localStorage.setItem(key, '1') } catch {}; setHidden(true) }}
+        className="shrink-0 rounded p-0.5 text-sky-300/60 hover:bg-sky-500/10 hover:text-sky-200"><IconX size={15} /></button>
+    </div>
+  )
+}
 
 export function Card({ className, children, ...p }) {
   return <div className={cx('rounded-xl border border-slate-800 bg-slate-900/60 shadow-sm', className)} {...p}>{children}</div>
