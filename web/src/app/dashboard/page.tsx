@@ -6,13 +6,18 @@ import { getQuota } from '@/lib/quota'
 import { PLANS } from '@/lib/plans'
 import { Card, Logo, Badge } from '@/components/ui'
 import { SignOutBtn, ApiTokenBox, UpgradePanel } from '@/components/dashboard'
+import { genApiToken } from '@/lib/apiAuth'
 
 export default async function Dashboard() {
   const session = await auth()
   const userId = (session?.user as any)?.id
   if (!userId) redirect('/login')
-  const user = await prisma.user.findUnique({ where: { id: userId } })
+  let user = await prisma.user.findUnique({ where: { id: userId } })
   if (!user) redirect('/login')
+
+  // User tạo qua Google chưa có apiToken / subscription → cấp ngay
+  if (!user.apiToken) user = await prisma.user.update({ where: { id: userId }, data: { apiToken: genApiToken() } })
+  await prisma.subscription.upsert({ where: { userId }, create: { userId, plan: 'free' }, update: {} })
 
   const quota = await getQuota(userId)
   const plan = PLANS[quota.plan]

@@ -897,10 +897,10 @@ chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name === TICK_ALARM) { try { await processOneStep(); } catch (e) { console.warn(e); } }
 });
 
-// Bấm icon extension → mở (hoặc focus) web app điều khiển.
-const DASHBOARD_URL = 'http://localhost:5173/';
+// Bấm icon extension → mở (hoặc focus) control panel.
+const DASHBOARD_URL = 'https://toolmktai.com/app/';
 chrome.action.onClicked.addListener(async () => {
-  const tabs = await chrome.tabs.query({ url: ['http://localhost:5173/*', 'http://127.0.0.1:5173/*'] });
+  const tabs = await chrome.tabs.query({ url: ['https://toolmktai.com/app/*', 'http://localhost:5173/*', 'http://127.0.0.1:5173/*'] });
   if (tabs[0]?.id != null) {
     chrome.tabs.update(tabs[0].id, { active: true });
     if (tabs[0].windowId != null) chrome.windows.update(tabs[0].windowId, { focused: true });
@@ -1061,7 +1061,7 @@ chrome.runtime.onMessage.addListener((req, _s, sendResponse) => { handle(req, se
 
 chrome.runtime.onMessageExternal.addListener((req, sender, sendResponse) => {
   const origin = sender.origin || '';
-  const allowed = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+  const allowed = ['https://toolmktai.com', 'http://localhost:5173', 'http://127.0.0.1:5173'];
   if (!allowed.includes(origin)) { sendResponse({ ok: false, error: 'forbidden' }); return true; }
   handle(req, sendResponse);
   return true;
