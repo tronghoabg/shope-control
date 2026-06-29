@@ -119,42 +119,36 @@ export default function Settings() {
 }
 
 function AccountSection() {
-  const { s, setCfg, call } = useShope()
-  const [cfg, setLocal] = useState(null)
-  useEffect(() => { if (s?.cfg && !cfg) setLocal({ licenseToken: s.cfg.licenseToken || '', webBase: s.cfg.webBase || 'http://localhost:3000' }) }, [s, cfg])
-  if (!cfg) return null
-  const lic = s?.license || { linked: false }
-  const planName = { free: 'Miễn phí', m1: 'Pro 1 tháng', m6: 'Pro 6 tháng', m12: 'Pro 12 tháng' }[lic.plan] || lic.plan
-
-  const saveCheck = async () => { await setCfg({ licenseToken: cfg.licenseToken.trim(), webBase: cfg.webBase.trim() }); await call({ type: 'CHECK_LICENSE' }) }
+  const { account } = useShope()
+  const a = account
+  const planName = { free: 'Miễn phí', m1: 'Pro 1 tháng', m6: 'Pro 6 tháng', m12: 'Pro 12 tháng' }
 
   return (
     <Section title="Tài khoản & hạn mức">
-      <div className="space-y-4">
-        <Field label="API token (lấy ở web Dashboard)" right={
-          <a href={(cfg.webBase || 'http://localhost:3000') + '/dashboard'} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:underline">
-            <IconExternalLink size={13} /> Mở web Dashboard
-          </a>
-        }>
-          <div className="flex gap-2">
-            <Input type="password" placeholder="shk_…" value={cfg.licenseToken} onChange={(e) => setLocal({ ...cfg, licenseToken: e.target.value })} />
-            <Btn variant="primary" onClick={saveCheck} className="shrink-0">Lưu &amp; kiểm tra</Btn>
+      {a === null ? (
+        <p className="text-sm text-slate-500">Đang kiểm tra tài khoản…</p>
+      ) : !a.loggedIn ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-slate-400">Chưa đăng nhập. Đăng nhập để áp gói &amp; hạn mức (free 10 comment/ngày).</p>
+          <a href="/login" className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500">Đăng nhập</a>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <Badge color={a.plan && a.plan !== 'free' ? 'green' : 'gray'}>{planName[a.plan] || 'Miễn phí'}</Badge>
+            <span className="text-slate-300">{a.name || a.email}</span>
+            <span className="text-slate-500">·</span>
+            <span className="text-slate-400">{a.remaining === -1 ? 'Comment không giới hạn' : `Hôm nay ${a.usedToday ?? 0}/${a.dailyLimit ?? 10} comment`}</span>
+            {a.expiresAt && <span className="text-xs text-slate-500">· hết hạn {new Date(a.expiresAt).toLocaleDateString('vi')}</span>}
           </div>
-        </Field>
-
-        {lic.linked && (
-          lic.valid === false
-            ? <Badge color="red">{lic.error || 'Token không hợp lệ'}</Badge>
-            : <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Badge color={lic.plan && lic.plan !== 'free' ? 'green' : 'gray'}>{planName}</Badge>
-                <span className="text-slate-400">
-                  {lic.remaining === -1 ? 'Comment không giới hạn' : `Hôm nay: ${lic.usedToday ?? 0}/${lic.dailyLimit ?? 10} comment`}
-                </span>
-                {lic.expiresAt && <span className="text-xs text-slate-500">· hết hạn {new Date(lic.expiresAt).toLocaleDateString('vi')}</span>}
-              </div>
-        )}
-        {!cfg.licenseToken && <p className="text-xs text-slate-500">Chưa liên kết — extension chạy không giới hạn cục bộ. Liên kết tài khoản để áp hạn mức gói (free 10 comment/ngày) &amp; nâng cấp Pro.</p>}
-      </div>
+          <div className="flex items-center gap-2">
+            <a href="/dashboard" className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-orange-500 to-red-600 px-3 py-2 text-sm font-semibold text-white hover:from-orange-400 hover:to-red-500">
+              {a.plan && a.plan !== 'free' ? 'Quản lý gói' : 'Nâng cấp Pro'} <IconExternalLink size={13} />
+            </a>
+            <span className="text-xs text-slate-500">Đã tự liên kết tài khoản — khỏi dán token.</span>
+          </div>
+        </div>
+      )}
     </Section>
   )
 }

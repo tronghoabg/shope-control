@@ -10,6 +10,7 @@ export function ShopeProvider({ children }) {
   const [s, setS] = useState(null)
   const [connected, setConnected] = useState(false)
   const [toasts, setToasts] = useState([])
+  const [account, setAccount] = useState(null)   // tài khoản web (từ /api/me)
   const triedConnect = useRef(false)
 
   const notify = useCallback((color, message) => {
@@ -45,9 +46,30 @@ export function ShopeProvider({ children }) {
     if (connected && !triedConnect.current) {
       triedConnect.current = true
       connectFb(true)
-      ext({ type: 'CHECK_LICENSE' }).then(() => refresh())   // nạp trạng thái gói/hạn mức
     }
-  }, [connected, connectFb, refresh])
+  }, [connected, connectFb])
+
+  // TỰ liên kết tài khoản: /app cùng origin web → có session cookie → lấy token tự động (khỏi dán tay)
+  const triedLink = useRef(false)
+  const linkAccount = useCallback(async () => {
+    try {
+      const r = await fetch('/api/me', { credentials: 'include' })
+      const me = r.ok ? await r.json() : { loggedIn: false }
+      setAccount(me)
+      if (me.loggedIn && me.apiToken) {
+        const st = await ext({ type: 'GET_STATE' })
+        if (st?.cfg?.licenseToken !== me.apiToken) {
+          await ext({ type: 'SET_CFG', cfg: { licenseToken: me.apiToken, webBase: window.location.origin } })
+        }
+        await ext({ type: 'CHECK_LICENSE' })
+        refresh()
+      }
+    } catch { setAccount({ loggedIn: false }) }
+  }, [refresh])
+
+  useEffect(() => {
+    if (connected && !triedLink.current) { triedLink.current = true; linkAccount() }
+  }, [connected, linkAccount])
 
   const call = useCallback(async (payload, { okMsg, errMsg, timeout } = {}) => {
     const r = await ext(payload, timeout)
@@ -65,7 +87,7 @@ export function ShopeProvider({ children }) {
   const provider = s?.cfg?.provider || 'anthropic'
   const hasKey = !!((s?.cfg?.apiKeys || {})[provider] || '').trim()
 
-  const value = { s, connected, hasKey, refresh, connectFb, call, setCfg, notify, toasts }
+  const value = { s, connected, hasKey, account, refresh, connectFb, call, setCfg, notify, toasts, linkAccount }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 

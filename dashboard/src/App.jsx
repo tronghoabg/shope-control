@@ -6,31 +6,33 @@ import {
 
 const PLAN_NAME = { free: 'Miễn phí', m1: 'Pro 1 tháng', m6: 'Pro 6 tháng', m12: 'Pro 12 tháng' }
 
-function AccountBox({ license, onManage }) {
-  const lic = license || { linked: false }
-  const linked = lic.linked && lic.valid !== false
-  const pro = lic.plan && lic.plan !== 'free'
-  const usedTxt = lic.remaining === -1 ? 'Không giới hạn' : `${lic.usedToday ?? 0}/${lic.dailyLimit ?? 10} hôm nay`
+function AccountBox({ account, onManage }) {
+  const a = account
+  if (a === null) return <div className="mt-auto border-t border-slate-800 p-3 text-[11px] text-slate-600">Đang tải tài khoản…</div>
+  if (!a.loggedIn) return (
+    <div className="mt-auto border-t border-slate-800 p-3">
+      <a href="/login" className="flex items-center gap-2.5 rounded-lg p-2 hover:bg-slate-800">
+        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-700 text-slate-300"><IconUserCircle size={20} /></div>
+        <div><div className="text-sm font-medium text-slate-200">Đăng nhập</div><div className="text-[11px] text-slate-500">Để áp gói &amp; hạn mức →</div></div>
+      </a>
+    </div>
+  )
+  const pro = a.plan && a.plan !== 'free'
+  const usedTxt = a.remaining === -1 ? 'Không giới hạn' : `${a.usedToday ?? 0}/${a.dailyLimit ?? 10} hôm nay`
+  const initial = (a.name || a.email || '?')[0].toUpperCase()
   return (
     <div className="mt-auto border-t border-slate-800 p-3">
       <button onClick={onManage} className="flex w-full items-center gap-2.5 rounded-lg p-2 text-left hover:bg-slate-800">
-        <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${pro ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-300'}`}>
-          {pro ? <IconCrown size={18} /> : <IconUserCircle size={20} />}
+        <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-semibold ${pro ? 'bg-amber-500/20 text-amber-400' : 'bg-indigo-600 text-white'}`}>
+          {pro ? <IconCrown size={18} /> : initial}
         </div>
         <div className="min-w-0 flex-1">
-          {linked ? (
-            <>
-              <div className="flex items-center gap-1.5 text-sm font-medium text-slate-100">
-                {PLAN_NAME[lic.plan] || 'Tài khoản'}
-              </div>
-              <div className="truncate text-[11px] text-slate-500">{usedTxt}{lic.expiresAt ? ` · đến ${new Date(lic.expiresAt).toLocaleDateString('vi')}` : ''}</div>
-            </>
-          ) : (
-            <>
-              <div className="text-sm font-medium text-slate-200">Liên kết tài khoản</div>
-              <div className="text-[11px] text-slate-500">Để áp gói &amp; hạn mức →</div>
-            </>
-          )}
+          <div className="truncate text-sm font-medium text-slate-100">{a.name || a.email}</div>
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span className={pro ? 'font-medium text-amber-400' : 'text-slate-500'}>{PLAN_NAME[a.plan] || 'Miễn phí'}</span>
+            <span className="text-slate-600">·</span>
+            <span className="text-slate-500">{usedTxt}</span>
+          </div>
         </div>
       </button>
     </div>
@@ -62,7 +64,7 @@ const NAV = [
 ]
 
 export default function App() {
-  const { s, connected, hasKey, connectFb } = useShope()
+  const { s, connected, hasKey, connectFb, account } = useShope()
   const [page, setPage] = useState('overview')
   const [showLogs, setShowLogs] = useState(true)
   const conn = s?.conn
@@ -117,7 +119,7 @@ export default function App() {
           })}
         </nav>
 
-        <AccountBox license={s?.license} onManage={() => setPage('settings')} />
+        <AccountBox account={account} onManage={() => setPage('settings')} />
       </aside>
 
       {/* Main */}

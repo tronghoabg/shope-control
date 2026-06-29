@@ -33,13 +33,13 @@ export function LogoMark({ size = 36 }: { size?: number }) {
 
 export function Logo({ size = 9 }: { size?: number }) {
   return (
-    <div className="flex items-center gap-2.5">
+    <Link href="/" className="flex items-center gap-2.5 transition-opacity hover:opacity-80">
       <LogoMark size={size * 4} />
       <div>
         <div className="font-bold leading-tight text-slate-100">ToolMKT AI</div>
         <div className="text-[11px] text-slate-500">Rải link Shopee bằng AI</div>
       </div>
-    </div>
+    </Link>
   )
 }
 
