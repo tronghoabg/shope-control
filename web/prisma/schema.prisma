@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite" // đổi "postgresql" khi deploy
+  provider = "postgresql" // DB dùng chung trên VPS (local + server cùng trỏ vào)
   url      = env("DATABASE_URL")
 }
 

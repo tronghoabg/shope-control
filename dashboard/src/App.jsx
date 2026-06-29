@@ -1,8 +1,41 @@
 import { useState, useEffect } from 'react'
 import {
   IconLayoutDashboard, IconUsersGroup, IconListCheck, IconShoppingCart,
-  IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink,
+  IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink, IconUserCircle, IconCrown,
 } from '@tabler/icons-react'
+
+const PLAN_NAME = { free: 'Miễn phí', m1: 'Pro 1 tháng', m6: 'Pro 6 tháng', m12: 'Pro 12 tháng' }
+
+function AccountBox({ license, onManage }) {
+  const lic = license || { linked: false }
+  const linked = lic.linked && lic.valid !== false
+  const pro = lic.plan && lic.plan !== 'free'
+  const usedTxt = lic.remaining === -1 ? 'Không giới hạn' : `${lic.usedToday ?? 0}/${lic.dailyLimit ?? 10} hôm nay`
+  return (
+    <div className="mt-auto border-t border-slate-800 p-3">
+      <button onClick={onManage} className="flex w-full items-center gap-2.5 rounded-lg p-2 text-left hover:bg-slate-800">
+        <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${pro ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-300'}`}>
+          {pro ? <IconCrown size={18} /> : <IconUserCircle size={20} />}
+        </div>
+        <div className="min-w-0 flex-1">
+          {linked ? (
+            <>
+              <div className="flex items-center gap-1.5 text-sm font-medium text-slate-100">
+                {PLAN_NAME[lic.plan] || 'Tài khoản'}
+              </div>
+              <div className="truncate text-[11px] text-slate-500">{usedTxt}{lic.expiresAt ? ` · đến ${new Date(lic.expiresAt).toLocaleDateString('vi')}` : ''}</div>
+            </>
+          ) : (
+            <>
+              <div className="text-sm font-medium text-slate-200">Liên kết tài khoản</div>
+              <div className="text-[11px] text-slate-500">Để áp gói &amp; hạn mức →</div>
+            </>
+          )}
+        </div>
+      </button>
+    </div>
+  )
+}
 import { useShope } from './ShopeContext.jsx'
 import { Btn, Badge, Spinner, LogoMark } from './ui.jsx'
 import LogPanel from './LogPanel.jsx'
@@ -84,7 +117,7 @@ export default function App() {
           })}
         </nav>
 
-        <div className="mt-auto p-3 text-[11px] text-slate-600">v0.1 · dùng cá nhân</div>
+        <AccountBox license={s?.license} onManage={() => setPage('settings')} />
       </aside>
 
       {/* Main */}

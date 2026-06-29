@@ -25,7 +25,7 @@ const DEFAULTS = {
   requireApproval: true,      // true = chỉ đăng item đã được duyệt trong web app
   mode: 'affiliate',          // 'affiliate' = rải link Shopee · 'social' = comment dạo (không link, không cần catalog)
   licenseToken: '',           // token tài khoản (lấy ở web Dashboard) — để đồng bộ hạn mức free/Pro
-  webBase: 'https://toolmktai.com', // địa chỉ web SaaS
+  webBase: 'http://localhost:3000', // địa chỉ web SaaS (LOCAL test; production: https://toolmktai.com)
   productSource: 'catalog',   // (chế độ affiliate) 'catalog' = CSV tự nạp · 'shopee' = AI tự nghĩ SP + search Shopee + dựng link
   affiliateId: '',            // ID tiếp thị liên kết Shopee (dùng dựng link hoa hồng cho nguồn 'shopee')
   subId: '',                  // sub_id tracking (tối đa 5 giá trị, cách nhau '-'); để trống cũng được
@@ -897,15 +897,17 @@ chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name === TICK_ALARM) { try { await processOneStep(); } catch (e) { console.warn(e); } }
 });
 
-// Bấm icon extension → mở (hoặc focus) control panel.
-const DASHBOARD_URL = 'https://toolmktai.com/app/';
+// Bấm icon extension → mở (hoặc focus) control panel tại {webBase}/app
 chrome.action.onClicked.addListener(async () => {
-  const tabs = await chrome.tabs.query({ url: ['https://toolmktai.com/app/*', 'http://localhost:5173/*', 'http://127.0.0.1:5173/*'] });
+  const { cfg } = await getCfg();
+  const base = (cfg.webBase || 'http://localhost:3000').replace(/\/$/, '');
+  const appUrl = base + '/app/';
+  const tabs = await chrome.tabs.query({ url: [base + '/app/*', 'https://toolmktai.com/app/*', 'http://localhost:3000/app/*'] });
   if (tabs[0]?.id != null) {
     chrome.tabs.update(tabs[0].id, { active: true });
     if (tabs[0].windowId != null) chrome.windows.update(tabs[0].windowId, { focused: true });
   } else {
-    chrome.tabs.create({ url: DASHBOARD_URL });
+    chrome.tabs.create({ url: appUrl });
   }
 });
 

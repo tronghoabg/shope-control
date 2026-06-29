@@ -121,7 +121,7 @@ export default function Settings() {
 function AccountSection() {
   const { s, setCfg, call } = useShope()
   const [cfg, setLocal] = useState(null)
-  useEffect(() => { if (s?.cfg && !cfg) setLocal({ licenseToken: s.cfg.licenseToken || '', webBase: s.cfg.webBase || 'https://toolmktai.com' }) }, [s, cfg])
+  useEffect(() => { if (s?.cfg && !cfg) setLocal({ licenseToken: s.cfg.licenseToken || '', webBase: s.cfg.webBase || 'http://localhost:3000' }) }, [s, cfg])
   if (!cfg) return null
   const lic = s?.license || { linked: false }
   const planName = { free: 'Miễn phí', m1: 'Pro 1 tháng', m6: 'Pro 6 tháng', m12: 'Pro 12 tháng' }[lic.plan] || lic.plan
@@ -132,7 +132,7 @@ function AccountSection() {
     <Section title="Tài khoản & hạn mức">
       <div className="space-y-4">
         <Field label="API token (lấy ở web Dashboard)" right={
-          <a href={(cfg.webBase || 'https://toolmktai.com') + '/dashboard'} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:underline">
+          <a href={(cfg.webBase || 'http://localhost:3000') + '/dashboard'} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:underline">
             <IconExternalLink size={13} /> Mở web Dashboard
           </a>
         }>

@@ -42,8 +42,12 @@ export function ShopeProvider({ children }) {
   }, [refresh, notify])
 
   useEffect(() => {
-    if (connected && !triedConnect.current) { triedConnect.current = true; connectFb(true) }
-  }, [connected, connectFb])
+    if (connected && !triedConnect.current) {
+      triedConnect.current = true
+      connectFb(true)
+      ext({ type: 'CHECK_LICENSE' }).then(() => refresh())   // nạp trạng thái gói/hạn mức
+    }
+  }, [connected, connectFb, refresh])
 
   const call = useCallback(async (payload, { okMsg, errMsg, timeout } = {}) => {
     const r = await ext(payload, timeout)
