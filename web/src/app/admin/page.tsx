@@ -9,9 +9,10 @@ import Link from 'next/link'
 
 export default async function Admin() {
   const session = await auth()
-  const role = (session?.user as any)?.role
-  if (!session) redirect('/login')
-  if (role !== 'admin') redirect('/dashboard')
+  const uid = (session?.user as any)?.id
+  if (!uid) redirect('/login')
+  const me = await prisma.user.findUnique({ where: { id: uid } })
+  if (me?.role !== 'admin') redirect('/dashboard')
 
   const [users, payments, paidAgg, todayUsage] = await Promise.all([
     prisma.user.findMany({ include: { subscription: true }, orderBy: { createdAt: 'desc' }, take: 100 }),
