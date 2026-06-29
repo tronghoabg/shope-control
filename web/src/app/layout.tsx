@@ -2,8 +2,9 @@ import './globals.css'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Shope Control — Rải link Shopee bằng AI',
+  title: 'ToolMKT AI — Rải link Shopee bằng AI',
   description: 'Tự động tìm nhóm tiềm năng & comment rải link Shopee bằng AI. An toàn, có kiểm soát.',
+  metadataBase: new URL('https://toolmktai.com'),
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

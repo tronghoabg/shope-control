@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Shope Auto-Comment — Rải link Shopee bằng AI",
+  "name": "ToolMKT AI — Rải link Shopee bằng AI",
   "version": "0.1.0",
   "description": "Tự động tìm bài tiềm năng trong nhóm Facebook và gợi ý/đăng comment link Shopee phù hợp bằng AI.",
   "icons": {
@@ -9,7 +9,7 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_title": "Mở Shope Control (web app)"
+    "default_title": "Mở ToolMKT AI (web app)"
   },
   "background": {
     "service_worker": "background.js"
@@ -29,6 +29,8 @@
     "https://shopee.vn/*",
     "https://s.shopee.vn/*",
     "https://affiliate.shopee.vn/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*",
     "https://api.anthropic.com/*",
     "https://api.openai.com/*",
     "https://generativelanguage.googleapis.com/*"

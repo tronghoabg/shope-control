@@ -62,7 +62,7 @@ export default async function Home() {
       </section>
 
       <footer className="border-t border-slate-900 py-8 text-center text-xs text-slate-600">
-        Shope Control · Dùng cho mục đích cá nhân · Bạn tự chịu trách nhiệm tuân thủ điều khoản Facebook &amp; Shopee.
+        ToolMKT AI · Dùng cho mục đích cá nhân · Bạn tự chịu trách nhiệm tuân thủ điều khoản Facebook &amp; Shopee.
       </footer>
     </div>
   )

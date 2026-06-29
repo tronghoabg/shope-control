@@ -4,7 +4,7 @@ import {
   IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink,
 } from '@tabler/icons-react'
 import { useShope } from './ShopeContext.jsx'
-import { Btn, Badge, Spinner } from './ui.jsx'
+import { Btn, Badge, Spinner, LogoMark } from './ui.jsx'
 import LogPanel from './LogPanel.jsx'
 import Overview from './pages/Overview.jsx'
 import Discover from './pages/Discover.jsx'
@@ -42,10 +42,8 @@ export default function App() {
   if (!connected || !s) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-        <div className="grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 text-white shadow-lg shadow-orange-900/40">
-          <IconShoppingCart size={30} />
-        </div>
-        <div className="text-lg font-bold text-slate-100">Shope Control</div>
+        <LogoMark size={64} />
+        <div className="text-lg font-bold text-slate-100">ToolMKT AI</div>
         <div className="flex items-center gap-2 text-sm text-slate-400"><Spinner className="text-slate-400" /> Đang kết nối extension…</div>
         <div className="max-w-md text-sm leading-relaxed text-slate-500">
           Nếu chờ lâu: mở <code className="rounded bg-slate-800 px-1 text-slate-300">chrome://extensions</code> → bật <b>Developer mode</b> → <b>Load unpacked</b> thư mục <code className="rounded bg-slate-800 px-1 text-slate-300">extension/</code> (hoặc bấm ⟳ Reload), rồi <b>F5</b> trang này.
@@ -59,11 +57,9 @@ export default function App() {
       {/* Sidebar */}
       <aside className="flex w-60 flex-col border-r border-slate-800 bg-slate-900">
         <div className="flex items-center gap-2.5 px-4 py-4">
-          <div className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-orange-500 to-red-600 text-white">
-            <IconShoppingCart size={20} />
-          </div>
+          <LogoMark size={36} />
           <div>
-            <div className="font-bold leading-tight text-slate-100">Shope Control</div>
+            <div className="font-bold leading-tight text-slate-100">ToolMKT AI</div>
             <div className="text-[11px] text-slate-500">Rải link Shopee bằng AI</div>
           </div>
         </div>

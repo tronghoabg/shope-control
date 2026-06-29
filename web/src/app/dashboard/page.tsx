@@ -56,7 +56,7 @@ export default async function Dashboard() {
           {/* Kết nối extension */}
           <Card className="p-5">
             <div className="text-sm font-semibold text-slate-100">Kết nối extension</div>
-            <p className="mt-1 text-xs text-slate-500">Dán token này vào <b>Cài đặt</b> của extension Shope Control để đồng bộ tài khoản &amp; hạn mức.</p>
+            <p className="mt-1 text-xs text-slate-500">Dán token này vào <b>Cài đặt</b> của extension ToolMKT AI để đồng bộ tài khoản &amp; hạn mức.</p>
             <div className="mt-3"><ApiTokenBox token={user.apiToken || ''} /></div>
             <p className="mt-2 text-xs text-slate-600">Giữ bí mật token này — ai có nó dùng được hạn mức của bạn.</p>
           </Card>

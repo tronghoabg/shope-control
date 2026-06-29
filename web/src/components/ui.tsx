@@ -16,12 +16,27 @@ export function LinkBtn({ href, variant = 'default', className, children }: { hr
   return <Link href={href} className={cx('inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors', BTN[variant], className)}>{children}</Link>
 }
 
+export function LogoMark({ size = 36 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 128 128" aria-hidden>
+      <defs>
+        <linearGradient id="lm" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#FF8A3D" /><stop offset="1" stopColor="#E23112" />
+        </linearGradient>
+      </defs>
+      <rect x="8" y="8" width="112" height="112" rx="30" fill="url(#lm)" />
+      <polyline points="33,84 56,64 73,76 95,46" fill="none" stroke="#fff" strokeWidth="11" strokeLinecap="round" strokeLinejoin="round" />
+      <polygon points="95,46 74,49 92,66" fill="#fff" />
+    </svg>
+  )
+}
+
 export function Logo({ size = 9 }: { size?: number }) {
   return (
     <div className="flex items-center gap-2.5">
-      <div className={`grid place-items-center rounded-xl bg-gradient-to-br from-orange-500 to-red-600 text-white`} style={{ width: size * 4, height: size * 4 }}>🛒</div>
+      <LogoMark size={size * 4} />
       <div>
-        <div className="font-bold leading-tight text-slate-100">Shope Control</div>
+        <div className="font-bold leading-tight text-slate-100">ToolMKT AI</div>
         <div className="text-[11px] text-slate-500">Rải link Shopee bằng AI</div>
       </div>
     </div>

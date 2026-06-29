@@ -26,6 +26,22 @@ export function Card({ className, children, ...p }) {
   return <div className={cx('rounded-xl border border-slate-800 bg-slate-900/60 shadow-sm', className)} {...p}>{children}</div>
 }
 
+// Logo ToolMKT AI — mark gradient + mũi tên tăng trưởng
+export function LogoMark({ size = 36 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 128 128" aria-hidden>
+      <defs>
+        <linearGradient id="tmkt" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#FF8A3D" /><stop offset="1" stopColor="#E23112" />
+        </linearGradient>
+      </defs>
+      <rect x="8" y="8" width="112" height="112" rx="30" fill="url(#tmkt)" />
+      <polyline points="33,84 56,64 73,76 95,46" fill="none" stroke="#fff" strokeWidth="11" strokeLinecap="round" strokeLinejoin="round" />
+      <polygon points="95,46 74,49 92,66" fill="#fff" />
+    </svg>
+  )
+}
+
 export function Section({ title, right, children, className }) {
   return (
     <Card className={cx('p-5', className)}>

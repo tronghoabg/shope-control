@@ -24,6 +24,8 @@ const DEFAULTS = {
   tone: 'tự nhiên, thân thiện',
   requireApproval: true,      // true = chỉ đăng item đã được duyệt trong web app
   mode: 'affiliate',          // 'affiliate' = rải link Shopee · 'social' = comment dạo (không link, không cần catalog)
+  licenseToken: '',           // token tài khoản (lấy ở web Dashboard) — để đồng bộ hạn mức free/Pro
+  webBase: 'https://toolmktai.com', // địa chỉ web SaaS
   productSource: 'catalog',   // (chế độ affiliate) 'catalog' = CSV tự nạp · 'shopee' = AI tự nghĩ SP + search Shopee + dựng link
   affiliateId: '',            // ID tiếp thị liên kết Shopee (dùng dựng link hoa hồng cho nguồn 'shopee')
   subId: '',                  // sub_id tracking (tối đa 5 giá trị, cách nhau '-'); để trống cũng được
@@ -31,7 +33,7 @@ const DEFAULTS = {
 };
 
 async function getCfg() {
-  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress']);
+  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license']);
   return {
     progress: s.progress || { active: false, phase: '', label: '', current: 0, total: 0, updatedAt: 0 },
     cfg: { ...DEFAULTS, ...(s.cfg || {}) },
@@ -46,6 +48,7 @@ async function getCfg() {
     searchResults: s.searchResults || [],   // [{ groupId, name, memberCount, score, niche, joined, ... }]
     searchAt: s.searchAt || 0,
     commentHistory: s.commentHistory || [], // [{ postId, groupId, productName, link, comment, permalink, time }] mới nhất đầu
+    license: s.license || { linked: false }, // trạng thái tài khoản/quota web
   };
 }
 async function save(part) { await chrome.storage.local.set(part); }
@@ -85,6 +88,49 @@ function rndDelaySec(cfg) {
   const lo = Math.max(20, cfg.minDelaySec | 0);
   const hi = Math.max(lo + 5, cfg.maxDelaySec | 0);
   return Math.floor(lo + Math.random() * (hi - lo));
+}
+
+// ─── Liên kết tài khoản web (quota free/Pro) ─────────────────────────────────
+async function webFetch(cfg, path, method = 'GET') {
+  if (!cfg.licenseToken) return null;   // chưa liên kết → bỏ qua (chạy local)
+  try {
+    const r = await fetch((cfg.webBase || 'http://localhost:3000').replace(/\/$/, '') + path, {
+      method, headers: { authorization: 'Bearer ' + cfg.licenseToken },
+    });
+    return { status: r.status, json: await r.json().catch(() => ({})) };
+  } catch (e) { return { status: 0, json: { error: String(e?.message || e) }, neterr: true }; }
+}
+
+// Kiểm tra còn lượt trước khi đăng. Trả { ok, unlinked?, plan, remaining, msg }
+async function checkQuota(cfg) {
+  const r = await webFetch(cfg, '/api/usage', 'GET');
+  if (!r) return { ok: true, unlinked: true };
+  if (r.neterr) return { ok: true, neterr: true };   // mất mạng → không chặn (tránh kẹt)
+  if (r.status === 401) return { ok: false, msg: 'Token tài khoản không hợp lệ — kiểm tra ở web Dashboard' };
+  const q = r.json || {};
+  if (q.remaining === -1) return { ok: true, plan: q.plan, remaining: -1 };
+  return { ok: (q.remaining ?? 0) > 0, plan: q.plan, remaining: q.remaining ?? 0, used: q.usedToday, limit: q.dailyLimit,
+    msg: (q.remaining ?? 0) <= 0 ? `Hết ${q.dailyLimit} lượt comment miễn phí hôm nay — nâng cấp Pro để dùng không giới hạn.` : '' };
+}
+
+// Báo đã đăng 1 comment (+1 quota). Trả { ok, quota?, msg }
+async function reportComment(cfg) {
+  const r = await webFetch(cfg, '/api/usage', 'POST');
+  if (!r || r.neterr) return { ok: true };
+  if (r.status === 429) return { ok: false, quota: true, msg: r.json?.error || 'Hết lượt' };
+  return { ok: r.status < 300, remaining: r.json?.remaining };
+}
+
+// Lấy + lưu trạng thái license để hiển thị
+async function refreshLicense(cfg) {
+  const r = await webFetch(cfg, '/api/usage', 'GET');
+  let license;
+  if (!r) license = { linked: false };
+  else if (r.status === 401) license = { linked: true, valid: false, error: 'Token không hợp lệ' };
+  else if (r.neterr) license = { linked: true, valid: false, error: 'Không kết nối được web' };
+  else license = { linked: true, valid: true, ...r.json };
+  await save({ license });
+  return license;
 }
 
 // Tool BẮT BUỘC có API key AI (để đọc/đánh giá nhóm + bài). Thiếu → chặn sớm với thông báo rõ.
@@ -607,6 +653,14 @@ async function commitComment(item) {
   const tk = todayKey();
   if (state.dateKey !== tk) state = { ...state, dateKey: tk, doneToday: 0 };
 
+  // Kiểm tra hạn mức tài khoản (free 10/ngày) TRƯỚC khi đăng — nếu đã liên kết web
+  const qc = await checkQuota(cfg);
+  if (!qc.ok) {
+    await save({ stats: { ...stats, lastError: qc.msg } });
+    await pushLog('error', `⛔ ${qc.msg}`);
+    return { ok: false, error: qc.msg, quotaBlocked: true };
+  }
+
   const creds = await getCreds();
   let ok = false, error = '';
   try {
@@ -630,6 +684,10 @@ async function commitComment(item) {
         while (commentHistory.length > 500) commentHistory.pop();
         await chrome.storage.local.set({ commentHistory });
       } catch {}
+      // Báo +1 quota lên web (nếu liên kết) + cập nhật trạng thái
+      const rep = await reportComment(cfg);
+      if (!rep.ok && rep.quota) await pushLog('error', `⚠ ${rep.msg}`);
+      await refreshLicense(cfg);
     } else {
       error = 'comment_failed: ' + JSON.stringify(res.errors || '');
       stats = { ...stats, lastError: error, lastRunAt: Date.now() };
@@ -683,6 +741,13 @@ async function processOneStep(opts = {}) {
   const [item] = queue.splice(idx, 1);
   await save({ queue });
   const r = await commitComment(item);
+  // Hết hạn mức free → tắt auto, trả item lại hàng đợi
+  if (r.quotaBlocked) {
+    const { queue: q2 } = await getCfg();
+    await save({ queue: [item, ...q2] });
+    await stopAuto(false);
+    await pushLog('error', '⛔ Đã dừng Auto: hết hạn mức. Nâng cấp Pro để chạy tiếp.');
+  }
   return { ...r };
 }
 
@@ -903,6 +968,7 @@ async function handle(request, sendResponse) {
       case 'PING': sendResponse({ ok: true, version: chrome.runtime.getManifest().version }); break;
       case 'GET_STATE': sendResponse({ ok: true, ...(await getCfg()), conn: await getConn() }); break;
       case 'CONNECT_FB': sendResponse({ ok: true, conn: await connectFb() }); break;
+      case 'CHECK_LICENSE': { const { cfg } = await getCfg(); const lic = await refreshLicense(cfg); sendResponse({ ok: true, license: lic }); break; }
       case 'SET_CFG': {
         const { cfg } = await getCfg();
         await save({ cfg: { ...cfg, ...(request.cfg || {}) } });
