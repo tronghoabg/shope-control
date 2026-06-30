@@ -8,7 +8,7 @@ let _toastSeq = 0
 
 // Bản sao dữ liệu nhóm lưu vào localStorage của WEB (bền hơn extension — cài lại extension vẫn còn).
 const GROUP_CACHE_KEY = 'tmkt_groups_v1'
-const GROUP_KEYS = ['discoveredGroups', 'groupsSyncedAt', 'searchResults', 'searchAt', 'savedGroupLists', 'savedPosts']
+const GROUP_KEYS = ['discoveredGroups', 'groupsSyncedAt', 'searchResults', 'searchAt', 'savedGroupLists', 'savedPageLists', 'savedPosts']
 
 export function ShopeProvider({ children }) {
   const [s, setS] = useState(null)
@@ -28,13 +28,14 @@ export function ShopeProvider({ children }) {
     let r = await ext({ type: 'GET_STATE' })
     if (!r?.ok) { setConnected(false); return }
 
-    // Extension trống dữ liệu nhóm nhưng web localStorage có bản sao (vd vừa cài lại extension)
+    // Extension trống dữ liệu (vd vừa cài lại extension) nhưng web localStorage có bản sao
     // → đẩy bản sao trở lại extension MỘT lần để khôi phục nguồn dữ liệu.
-    if (!restoredGroups.current && !(r.discoveredGroups?.length)) {
+    const extEmpty = !(r.discoveredGroups?.length) && !(r.savedGroupLists?.length) && !(r.savedPageLists?.length)
+    if (!restoredGroups.current && extEmpty) {
       restoredGroups.current = true
       try {
         const cached = JSON.parse(localStorage.getItem(GROUP_CACHE_KEY) || 'null')
-        if (cached?.discoveredGroups?.length) {
+        if (cached && (cached.discoveredGroups?.length || cached.savedGroupLists?.length || cached.savedPageLists?.length)) {
           await ext({ type: 'RESTORE_GROUPS', snapshot: cached })
           const r2 = await ext({ type: 'GET_STATE' })
           if (r2?.ok) r = r2
@@ -42,9 +43,9 @@ export function ShopeProvider({ children }) {
       } catch {}
     }
 
-    // Sao lưu dữ liệu nhóm vào localStorage của web (bền hơn extension)
+    // Sao lưu dữ liệu nhóm/page vào localStorage của web (bền hơn extension)
     try {
-      if (r.discoveredGroups?.length || r.searchResults?.length || r.savedGroupLists?.length) {
+      if (r.discoveredGroups?.length || r.searchResults?.length || r.savedGroupLists?.length || r.savedPageLists?.length) {
         const snap = {}
         for (const k of GROUP_KEYS) if (r[k] != null) snap[k] = r[k]
         localStorage.setItem(GROUP_CACHE_KEY, JSON.stringify(snap))

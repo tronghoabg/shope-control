@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import {
   IconDeviceFloppy, IconSend, IconTrash, IconExternalLink, IconListCheck, IconRadar,
   IconChevronDown, IconBookmark, IconPlayerPlay, IconPlayerStop, IconHandStop, IconUsersGroup, IconSettings, IconBolt,
+  IconBuildingStore, IconDownload,
 } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
@@ -27,13 +28,13 @@ function QueueItem({ it, onAct, selected, onSel }) {
     <Card className={`p-4 ${selected ? 'border-indigo-500/60 bg-indigo-500/[0.06]' : ''}`}>
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <input type="checkbox" checked={selected} onChange={() => onSel(it.postId)} className="h-4 w-4 accent-indigo-500" />
-        <Badge color="yellow">điểm {it.score}</Badge>
+        {it.isPage ? <Badge color="blue">Page{it.pageName ? `: ${it.pageName}` : ''}</Badge> : <Badge color="yellow">điểm {it.score}</Badge>}
         {it.productName && <Badge color="blue">{it.productName}</Badge>}
         {it.link && <Badge color="indigo">có link</Badge>}
         {it.permalink && <a href={it.permalink} target="_blank" rel="noreferrer" className="ml-auto inline-flex items-center gap-1 text-xs text-indigo-400 hover:underline"><IconExternalLink size={13} /> xem bài</a>}
       </div>
       <p className="mb-2 line-clamp-2 text-xs text-slate-500">📄 {it.text || '(không có nội dung)'}</p>
-      <Textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} />
+      <Textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Nội dung comment…" />
       <div className="mt-2 flex flex-wrap gap-2">
         {dirty && <Btn size="sm" icon={IconDeviceFloppy} onClick={() => onAct('EDIT_ITEM', it.postId, { comment })}>Lưu sửa</Btn>}
         <Btn size="sm" variant="primary" icon={IconSend} onClick={() => onAct('POST_ITEM', it.postId, null, 60000)}>Đăng bài này</Btn>
@@ -46,13 +47,19 @@ function QueueItem({ it, onAct, selected, onSel }) {
 export default function Queue() {
   const { s, call, setCfg, notify, refresh } = useShope()
   const [cfgL, setLocal] = useState(null)
-  const [panel, setPanel] = useState(null) // 'groups' | 'adv' | 'auto' | null
+  const [panel, setPanel] = useState(null) // 'groups' | 'pages' | 'adv' | 'auto' | null
   const [sel, setSel] = useState(() => new Set())
   const [scanning, setScanning] = useState(false)
   const [posting, setPosting] = useState(false)
   const [pstat, setPstat] = useState({ done: 0, total: 0, wait: 0 })
   const [listName, setListName] = useState('')
   const stopRef = useRef(false)
+
+  // Luồng Page: tự lấy bài → user chọn + tự đặt nội dung
+  const [pagePosts, setPagePosts] = useState([])
+  const [selPP, setSelPP] = useState(() => new Set())
+  const [pageContent, setPageContent] = useState('')
+  const [loadingPP, setLoadingPP] = useState(false)
 
   useEffect(() => { if (s?.cfg && !cfgL) setLocal(s.cfg) }, [s, cfgL])
   if (!s || !cfgL) return <p className="text-slate-500">Đang tải…</p>
@@ -72,11 +79,12 @@ export default function Queue() {
     const minD = Math.max(MIN_DELAY, cfgL.minDelaySec || MIN_DELAY)   // ép sàn 90s
     const maxD = Math.max(minD, cfgL.maxDelaySec || minD)
     setLocal({ ...cfgL, minDelaySec: minD, maxDelaySec: maxD })
-    setCfg({ dailyCap: cfgL.dailyCap, minDelaySec: minD, maxDelaySec: maxD, minScore: cfgL.minScore, postsPerScan: cfgL.postsPerScan, requireApproval: cfgL.requireApproval, subId: cfgL.subId, shopeeLimit: cfgL.shopeeLimit, shopeeFocusTab: cfgL.shopeeFocusTab })
+    setCfg({ dailyCap: cfgL.dailyCap, minDelaySec: minD, maxDelaySec: maxD, minScore: cfgL.minScore, postsPerScan: cfgL.postsPerScan, requireApproval: cfgL.requireApproval, subId: cfgL.subId, shopeeLimit: cfgL.shopeeLimit })
     if ((cfgL.minDelaySec || 0) < MIN_DELAY) notify('blue', `Delay tối thiểu 90s (an toàn) — đã đặt về ${minD}s`)
   }
   const act = (type, postId, extra, timeout) => call({ type, postId, ...(extra || {}) }, { timeout })
 
+  // ── NHÓM mục tiêu (AI tự tìm bài tiềm năng) ──
   const targets = cfg.groupIds || []
   const targetSet = new Set(targets)
   const poolMap = new Map()
@@ -96,6 +104,33 @@ export default function Queue() {
     if (!nGroups) return notify('red', 'Chưa chọn nhóm nào')
     const n = listName.trim() || `Danh sách ${new Date().toLocaleDateString('vi')}`
     await call({ type: 'SAVE_GROUP_LIST', name: n, groupIds: targets }, { okMsg: `Đã lưu "${n}"` }); setListName('')
+  }
+
+  // ── PAGE mục tiêu (user tự chọn bài + tự đặt nội dung) ──
+  const targetPages = s.targetPages || []
+  const nPages = targetPages.length
+  const savedPageLists = s.savedPageLists || []
+  const applyPageList = (l) => call({ type: 'SET_TARGET_PAGES', pages: l.pages }, { okMsg: `Đã chọn "${l.name}" (${l.pages.length} page)` })
+  const activePageList = (l) => l.pages.length > 0 && l.pages.length === nPages && l.pages.every(p => targetPages.some(t => t.pageId === p.pageId))
+
+  const loadPagePosts = async () => {
+    if (!nPages) return notify('red', 'Chọn ít nhất 1 Page mục tiêu')
+    setLoadingPP(true)
+    const r = await ext({ type: 'LIST_PAGE_POSTS' }, 240000)
+    setLoadingPP(false)
+    if (!r?.ok) return notify('red', r?.error || 'Lấy bài Page lỗi')
+    setPagePosts(r.posts || []); setSelPP(new Set())
+    notify(r.posts?.length ? 'green' : 'blue', `Đã lấy ${r.posts?.length || 0} bài từ Page`)
+  }
+  const toggleSelPP = (id) => setSelPP(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const addPagePosts = async () => {
+    const chosen = pagePosts.filter(p => selPP.has(p.postId))
+    if (!chosen.length) return notify('red', 'Chưa chọn bài nào')
+    const content = pageContent.trim()
+    if (!content) return notify('red', 'Nhập nội dung comment trước')
+    const posts = chosen.map(p => ({ ...p, comment: content }))
+    const r = await call({ type: 'ADD_PAGE_POSTS_TO_QUEUE', posts }, { okMsg: 'Đã thêm vào hàng chờ' })
+    if (r?.ok) { setPagePosts(prev => prev.filter(p => !selPP.has(p.postId))); setSelPP(new Set()) }
   }
 
   const findPosts = async () => {
@@ -149,9 +184,13 @@ export default function Queue() {
       {/* ───── THANH CÔNG CỤ ───── */}
       <Card className="space-y-3 p-4">
         <div className="flex flex-wrap items-center gap-3">
-          {/* Nhóm */}
+          {/* Nhóm mục tiêu */}
           <button onClick={() => togglePanel('groups')} className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${panel === 'groups' ? 'border-indigo-500 bg-indigo-500/10 text-indigo-200' : 'border-slate-700 text-slate-200 hover:border-slate-600'}`}>
-            <IconUsersGroup size={16} /> {nGroups} nhóm mục tiêu <IconChevronDown size={14} className={panel === 'groups' ? 'rotate-180' : ''} />
+            <IconUsersGroup size={16} /> {nGroups} nhóm <IconChevronDown size={14} className={panel === 'groups' ? 'rotate-180' : ''} />
+          </button>
+          {/* Page mục tiêu */}
+          <button onClick={() => togglePanel('pages')} className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${panel === 'pages' ? 'border-indigo-500 bg-indigo-500/10 text-indigo-200' : 'border-slate-700 text-slate-200 hover:border-slate-600'}`}>
+            <IconBuildingStore size={16} /> {nPages} page <IconChevronDown size={14} className={panel === 'pages' ? 'rotate-180' : ''} />
           </button>
 
           {/* Kiểu đăng — segmented */}
@@ -164,7 +203,7 @@ export default function Queue() {
 
           {scanning
             ? <Btn variant="danger" icon={IconPlayerStop} onClick={() => { ext({ type: 'CANCEL_RUN' }); notify('blue', 'Đang dừng quét…') }} className="ml-auto">Dừng quét</Btn>
-            : <Btn variant="primary" icon={IconRadar} disabled={!nGroups || posting} onClick={findPosts} className="ml-auto">Tìm bài tiềm năng</Btn>}
+            : <Btn variant="primary" icon={IconRadar} disabled={!nGroups || posting} onClick={findPosts} className="ml-auto">Tìm bài tiềm năng (nhóm)</Btn>}
           <button onClick={() => togglePanel('adv')} title="Cấu hình nâng cao" className={`grid h-9 w-9 place-items-center rounded-lg border transition-colors ${panel === 'adv' ? 'border-indigo-500 text-indigo-300' : 'border-slate-700 text-slate-400 hover:text-white'}`}><IconSettings size={16} /></button>
           <button onClick={() => togglePanel('auto')} title="Tự động (Auto)" className={`grid h-9 w-9 place-items-center rounded-lg border transition-colors ${panel === 'auto' ? 'border-indigo-500 text-indigo-300' : running ? 'border-emerald-600 text-emerald-400' : 'border-slate-700 text-slate-400 hover:text-white'}`}><IconBolt size={16} /></button>
         </div>
@@ -172,7 +211,7 @@ export default function Queue() {
 
         {kind === 'social' && (
           <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-            <div className="mb-1.5 text-sm font-medium text-slate-200">Nội dung tìm khách <span className="text-xs font-normal text-slate-500">(tuỳ chọn — AI sẽ viết lại khác nhau mỗi bài để tránh trùng)</span></div>
+            <div className="mb-1.5 text-sm font-medium text-slate-200">Nội dung tìm khách <span className="text-xs font-normal text-slate-500">(dùng cho quét NHÓM — AI biến tấu khác nhau mỗi bài)</span></div>
             <Textarea rows={3} value={cfgL.seedContent || ''} onChange={e => setLocal({ ...cfgL, seedContent: e.target.value })}
               onBlur={() => setCfg({ seedContent: cfgL.seedContent || '' })}
               placeholder={'Ví dụ: Bên em chuyên sỉ/lẻ cây cảnh mini giá tốt, ai cần ib em tư vấn nhé. Zalo 09xxx.\n\nĐể trống = AI tự soạn comment hợp từng bài.'} />
@@ -196,7 +235,7 @@ export default function Queue() {
               <input type="checkbox" checked={allPoolSelected} disabled={!pool.length} onChange={togglePoolAll} className="h-4 w-4 accent-indigo-500" /> Chọn tất cả ({nGroups}/{pool.length})
             </label>
             {pool.length === 0
-              ? <Empty icon={IconListCheck}>Chưa có nhóm. Sang <b>Nhóm của tôi</b> để quét & chọn.</Empty>
+              ? <Empty icon={IconListCheck}>Chưa có nhóm. Sang <b>Nhóm của tôi</b> để quét & lưu danh sách.</Empty>
               : <div className="grid max-h-60 gap-px overflow-y-auto rounded-lg border border-slate-800 sm:grid-cols-2">
                 {pool.map(g => (
                   <div key={g.id} onClick={() => toggleTarget(g.id)} className={`flex cursor-pointer items-center gap-2.5 p-2 hover:bg-slate-800/40 ${targetSet.has(g.id) ? 'bg-indigo-500/10' : 'bg-slate-900/30'}`}>
@@ -210,6 +249,32 @@ export default function Queue() {
               <Input className="flex-1" value={listName} onChange={e => setListName(e.target.value)} placeholder="tên danh sách để lưu" />
               <Btn size="sm" variant="ghost" icon={IconBookmark} onClick={saveList} disabled={!nGroups}>Lưu danh sách</Btn>
             </div>
+          </div>
+        )}
+
+        {/* Panel: chọn page (áp danh sách đã lưu) */}
+        {panel === 'pages' && (
+          <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+            {savedPageLists.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-slate-500">Danh sách Page đã lưu:</span>
+                {savedPageLists.map(l => (
+                  <button key={l.id} onClick={() => applyPageList(l)} className={`rounded-full border px-2.5 py-1 text-xs ${activePageList(l) ? 'border-indigo-500 bg-indigo-500/15 text-indigo-200' : 'border-slate-700 bg-slate-800 text-slate-200 hover:border-indigo-500'}`}>{l.name} <span className="text-slate-500">({l.pages.length})</span></button>
+                ))}
+              </div>
+            ) : (
+              <Empty icon={IconBuildingStore}>Chưa có danh sách Page. Sang <b>Page mục tiêu</b> để chọn & lưu danh sách.</Empty>
+            )}
+            {nPages > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {targetPages.map(p => (
+                  <span key={p.pageId} className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/15 px-2.5 py-1 text-xs text-indigo-200">
+                    {p.icon && <img src={p.icon} alt="" referrerPolicy="no-referrer" className="h-4 w-4 rounded-full" />}
+                    <span className="max-w-[160px] truncate">{p.name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -242,11 +307,52 @@ export default function Queue() {
         )}
       </Card>
 
-      {/* ───── KẾT QUẢ ───── */}
+      {/* ───── BÀI TỪ PAGE (tự chọn + tự đặt nội dung) ───── */}
+      <Card className="space-y-3 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+            <IconBuildingStore size={16} className="text-indigo-400" /> Bài từ Page mục tiêu <span className="text-xs font-normal text-slate-500">— bạn tự chọn bài & tự đặt nội dung</span>
+          </div>
+          {loadingPP
+            ? <Btn size="sm" variant="danger" icon={IconPlayerStop} onClick={() => { ext({ type: 'CANCEL_RUN' }); notify('blue', 'Đang dừng…') }}>Dừng</Btn>
+            : <Btn size="sm" variant="default" icon={IconDownload} disabled={!nPages} onClick={loadPagePosts}>Lấy bài từ {nPages} Page</Btn>}
+        </div>
+        {nPages === 0 && <p className="text-xs text-amber-400">Chưa chọn Page mục tiêu. Bấm nút <b>page</b> ở trên để áp một danh sách Page đã lưu.</p>}
+
+        {pagePosts.length > 0 && (
+          <>
+            <Textarea rows={3} value={pageContent} onChange={e => setPageContent(e.target.value)}
+              placeholder="Nội dung comment bạn muốn đăng cho các bài đã chọn (tự đặt). Vd: Bên em có mẫu này giá tốt, ib em nhé!" />
+            <div className="max-h-72 divide-y divide-slate-800 overflow-y-auto rounded-lg border border-slate-800">
+              {pagePosts.map(p => (
+                <div key={p.postId} onClick={() => toggleSelPP(p.postId)}
+                  className={`flex cursor-pointer items-start gap-2.5 p-3 hover:bg-slate-800/40 ${selPP.has(p.postId) ? 'bg-indigo-500/10' : ''}`}>
+                  <input type="checkbox" checked={selPP.has(p.postId)} readOnly className="pointer-events-none mt-1 h-4 w-4 shrink-0 accent-indigo-500" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge color="blue">{p.pageName || 'Page'}</Badge>
+                      {p.already && <Badge color="gray">đã comment</Badge>}
+                      {p.permalink && <a href={p.permalink} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-xs text-indigo-400 hover:underline">xem bài</a>}
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs text-slate-400">{p.text || '(không có nội dung text)'}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-end">
+              <Btn size="sm" variant="success" icon={IconSend} disabled={!selPP.size || !pageContent.trim()} onClick={addPagePosts}>
+                Thêm vào hàng chờ ({selPP.size})
+              </Btn>
+            </div>
+          </>
+        )}
+      </Card>
+
+      {/* ───── HÀNG CHỜ DUYỆT ───── */}
       <Card className="p-0">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 px-4 py-3">
           <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={!queue.length} className="h-4 w-4 accent-indigo-500" />
-          <h2 className="font-semibold text-slate-100">Bài tìm được</h2>
+          <h2 className="font-semibold text-slate-100">Bài chờ duyệt</h2>
           <span className="text-xs text-slate-500">{queue.length} bài{selCount ? ` · chọn ${selCount}` : ''}</span>
           <div className="ml-auto">
             {posting
@@ -256,7 +362,7 @@ export default function Queue() {
         </div>
         <div className="p-3">
           {queue.length === 0
-            ? <Empty icon={IconListCheck}>Chưa có bài. Chọn nhóm & kiểu đăng ở trên rồi bấm <b>Tìm bài tiềm năng</b>.</Empty>
+            ? <Empty icon={IconListCheck}>Chưa có bài. Quét <b>nhóm</b> ở trên, hoặc <b>lấy bài từ Page</b> rồi tự chọn.</Empty>
             : <div className="grid gap-3 xl:grid-cols-2">{queue.map(it => <QueueItem key={it.postId} it={it} onAct={act} selected={sel.has(it.postId)} onSel={toggleSel} />)}</div>}
         </div>
       </Card>

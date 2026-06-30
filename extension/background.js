@@ -500,35 +500,14 @@ async function getShopeeScrapeTab() {
   return tab.id;
 }
 
+// Đọc DOM trang search Shopee. THÍCH ỨNG: thử chạy NỀN (êm, không nháy) trước;
+// nếu 0 SP (tab nền bị Chrome đóng băng) thì focus tab 1 nhịp cho render rồi trả focus.
 async function searchShopeeDom(keyword, limit = 10, opts = {}) {
   const kw = String(keyword || '').trim();
   if (!kw) return [];
   const { cfg } = await getCfg();
-  // opts.focus (true/false) ghi đè cfg để TEST; mặc định theo cfg.shopeeFocusTab (BẬT).
-  const doFocus = opts.focus !== undefined ? !!opts.focus : (cfg.shopeeFocusTab !== false);
-  const tabId = await getShopeeScrapeTab();
   const url = `https://shopee.vn/search?keyword=${encodeURIComponent(kw)}`;
-
-  // Nhớ tab/cửa sổ đang active để TRẢ focus lại sau khi scrape xong (chỉ khi bật focus).
-  let prev = null;
-  if (doFocus) {
-    try {
-      const w = await chrome.windows.getLastFocused();
-      const [act] = await chrome.tabs.query({ active: true, windowId: w.id });
-      if (act && act.id !== tabId) prev = { tabId: act.id, windowId: w.id };
-    } catch {}
-  }
-
-  // BẬT focus: hiện tab Shopee 1 nhịp để render (tab nền hay bị 'đóng băng') rồi trả focus.
-  // TẮT focus: chỉ điều hướng nền (active:false) — để test xem Shopee còn render & scrape được không.
-  try {
-    await chrome.tabs.update(tabId, { url, active: doFocus });
-    if (doFocus) { const winId = (await chrome.tabs.get(tabId)).windowId; if (winId != null) await chrome.windows.update(winId, { focused: true }); }
-  } catch {
-    await chrome.storage.session.remove('shopeeTabId');
-    const t = await getShopeeScrapeTab();
-    await chrome.tabs.update(t, { url, active: doFocus });
-  }
+  const allowFocus = cfg.shopeeFocusTab !== false;   // cho phép focus dự phòng (mặc định cho)
 
   const scrape = async (tId) => {
     const res = await chrome.scripting.executeScript({
@@ -558,18 +537,36 @@ async function searchShopeeDom(keyword, limit = 10, opts = {}) {
     return res?.[0]?.result || [];
   };
 
-  // Chờ trang render danh sách SP (poll tối đa ~15s)
-  const deadline = Date.now() + 15000;
-  let items = [];
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 1200));
-    try { const arr = await scrape(tabId); if (arr.length) { items = arr; break; } }
-    catch { /* trang chưa sẵn sàng / đang điều hướng */ }
-  }
+  // 1 lượt: điều hướng (focus hoặc nền) → poll tối đa maxMs → trả items + trả focus.
+  const attempt = async (doFocus, maxMs) => {
+    let tabId = await getShopeeScrapeTab();
+    let prev = null;
+    if (doFocus) {
+      try { const w = await chrome.windows.getLastFocused(); const [a] = await chrome.tabs.query({ active: true, windowId: w.id }); if (a && a.id !== tabId) prev = { tabId: a.id, windowId: w.id }; } catch {}
+    }
+    try {
+      await chrome.tabs.update(tabId, { url, active: doFocus });
+      if (doFocus) { const wid = (await chrome.tabs.get(tabId)).windowId; if (wid != null) await chrome.windows.update(wid, { focused: true }); }
+    } catch {
+      await chrome.storage.session.remove('shopeeTabId');
+      tabId = await getShopeeScrapeTab(); await chrome.tabs.update(tabId, { url, active: doFocus });
+    }
+    const deadline = Date.now() + maxMs;
+    let items = [];
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 1200));
+      try { const arr = await scrape(tabId); if (arr.length) { items = arr; break; } } catch {}
+    }
+    if (doFocus && prev) { try { await chrome.tabs.update(prev.tabId, { active: true }); if (prev.windowId != null) await chrome.windows.update(prev.windowId, { focused: true }); } catch {} }
+    return items;
+  };
 
-  // Trả focus về tab/cửa sổ người dùng đang dùng (giảm "giật" màn hình).
-  if (doFocus && prev) {
-    try { await chrome.tabs.update(prev.tabId, { active: true }); if (prev.windowId != null) await chrome.windows.update(prev.windowId, { focused: true }); } catch {}
+  let items;
+  if (opts.focus !== undefined) {
+    items = await attempt(!!opts.focus, 15000);   // TEST: đúng chế độ chỉ định
+  } else {
+    items = await attempt(false, 12000);          // AUTO: thử NỀN trước (êm, ~10s)
+    if (!items.length && allowFocus) items = await attempt(true, 10000);   // 0 SP → focus 1 nhịp cho chắc
   }
 
   return items.slice(0, limit).map(it => ({
@@ -1477,6 +1474,7 @@ async function handle(request, sendResponse) {
           patch.searchAt = snap.searchAt || Date.now();
         }
         if ((!cur.savedGroupLists?.length) && snap.savedGroupLists?.length) patch.savedGroupLists = snap.savedGroupLists;
+        if ((!cur.savedPageLists?.length) && snap.savedPageLists?.length) patch.savedPageLists = snap.savedPageLists;
         if ((!cur.savedPosts?.length) && snap.savedPosts?.length) patch.savedPosts = snap.savedPosts;
         if (Object.keys(patch).length) await save(patch);
         sendResponse({ ok: true, restored: Object.keys(patch) });
