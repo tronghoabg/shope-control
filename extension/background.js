@@ -26,7 +26,7 @@ const DEFAULTS = {
   mode: 'affiliate',          // 'affiliate' = rải link Shopee · 'social' = comment dạo (không link, không cần catalog)
   seedContent: '',            // Comment dạo: nội dung tìm khách có sẵn → AI đổi lại mỗi bài (rỗng = AI tự soạn theo bài)
   licenseToken: '',           // token tài khoản (lấy ở web Dashboard) — để đồng bộ hạn mức free/Pro
-  webBase: 'http://localhost:3000', // địa chỉ web SaaS (LOCAL test; production: https://toolmktai.com)
+  webBase: 'https://toolmktai.com', // địa chỉ web SaaS production (auto-link sẽ ghi đè theo origin khi mở /app)
   productSource: 'catalog',   // (chế độ affiliate) 'catalog' = CSV tự nạp · 'shopee' = AI tự nghĩ SP + search Shopee + dựng link
   affiliateId: '',            // ID tiếp thị liên kết Shopee (dùng dựng link hoa hồng cho nguồn 'shopee')
   subId: '',                  // sub_id tracking (tối đa 5 giá trị, cách nhau '-'); để trống cũng được
@@ -105,7 +105,7 @@ function rndDelaySec(cfg) {
 async function webFetch(cfg, path, method = 'GET') {
   if (!cfg.licenseToken) return null;   // chưa liên kết → bỏ qua (chạy local)
   try {
-    const r = await fetch((cfg.webBase || 'http://localhost:3000').replace(/\/$/, '') + path, {
+    const r = await fetch((cfg.webBase || 'https://toolmktai.com').replace(/\/$/, '') + path, {
       method, headers: { authorization: 'Bearer ' + cfg.licenseToken },
     });
     return { status: r.status, json: await r.json().catch(() => ({})) };
@@ -1142,7 +1142,7 @@ chrome.alarms.onAlarm.addListener(async (a) => {
 // Bấm icon extension → mở (hoặc focus) control panel tại {webBase}/app
 chrome.action.onClicked.addListener(async () => {
   const { cfg } = await getCfg();
-  const base = (cfg.webBase || 'http://localhost:3000').replace(/\/$/, '');
+  const base = (cfg.webBase || 'https://toolmktai.com').replace(/\/$/, '');
   const appUrl = base + '/app/';
   // Nếu /app đã mở ở đâu đó (tab hoặc popup) → focus lại
   const tabs = await chrome.tabs.query({ url: [base + '/app/*', 'https://toolmktai.com/app/*', 'http://localhost:3000/app/*'] });
