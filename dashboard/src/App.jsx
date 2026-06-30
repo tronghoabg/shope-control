@@ -116,13 +116,13 @@ export default function App() {
 
   return (
     <div className="flex h-full">
-      {/* Sidebar */}
-      <aside className="flex w-60 flex-col border-r border-slate-800 bg-slate-900">
-        <div className="flex items-center gap-2.5 px-4 py-4">
-          <LogoMark size={36} />
+      {/* ════ SIDEBAR ════ */}
+      <aside className="flex w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-900">
+        <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-slate-800 px-4">
+          <LogoMark size={32} />
           <div>
-            <div className="font-bold leading-tight text-slate-100">ToolMKT AI</div>
-            <div className="text-[11px] text-slate-500">Tìm khách &amp; bán hàng Facebook bằng AI</div>
+            <div className="text-sm font-bold leading-tight text-slate-100">ToolMKT AI</div>
+            <div className="text-[10px] text-slate-500">Tìm khách &amp; bán hàng bằng AI</div>
           </div>
         </div>
 
@@ -155,15 +155,12 @@ export default function App() {
         </nav>
 
         <AccountBox account={account} onManage={() => setPage('settings')} />
-        <a href="https://zalo.me/g/fsjwncgaupa915h891zx" target="_blank" rel="noreferrer"
-          className="flex items-center justify-center gap-2 border-t border-slate-800 bg-slate-900 px-3 py-2.5 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/10">
-          💬 Nhóm hỗ trợ Zalo
-        </a>
       </aside>
 
-      {/* Main */}
+      {/* ════ RIGHT: Header · Container · Footer ════ */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center justify-between border-b border-slate-800 bg-slate-900/50 px-5">
+        {/* ── HEADER ── */}
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-800 bg-slate-900/50 px-5">
           <div className="flex items-center gap-1.5 text-sm">
             <StatusChip ok={connected} icon={connected ? IconPlugConnected : IconPlugConnectedX} label="Extension"
               title={connected ? 'Extension đã kết nối' : 'Chưa kết nối extension — Reload extension + F5'} />
@@ -196,14 +193,24 @@ export default function App() {
           </div>
         </header>
 
+        {/* ── CONTAINER ── */}
         <div className="flex min-h-0 flex-1">
-          <main className="flex-1 overflow-y-auto p-6">
+          <main className="flex-1 overflow-y-auto bg-slate-950 p-6">
             <div className="mx-auto max-w-5xl">
               {NAV.find(n => n.key === page)?.render(setPage)}
             </div>
           </main>
           {showLogs && <LogPanel onClose={() => setShowLogs(false)} />}
         </div>
+
+        {/* ── FOOTER ── */}
+        <footer className="flex h-9 shrink-0 items-center justify-between border-t border-slate-800 bg-slate-900/50 px-5 text-xs text-slate-500">
+          <span>ToolMKT AI · v1.0</span>
+          <div className="flex items-center gap-4">
+            <button onClick={() => setPage('guide')} className="hover:text-slate-300">Hướng dẫn</button>
+            <a href="https://zalo.me/g/fsjwncgaupa915h891zx" target="_blank" rel="noreferrer" className="font-medium text-emerald-400 hover:text-emerald-300">💬 Nhóm hỗ trợ Zalo</a>
+          </div>
+        </footer>
       </div>
     </div>
   )

@@ -103,12 +103,13 @@ function rndDelaySec(cfg) {
 }
 
 // ─── Liên kết tài khoản web (quota free/Pro) ─────────────────────────────────
-async function webFetch(cfg, path, method = 'GET') {
+async function webFetch(cfg, path, method = 'GET', body) {
   if (!cfg.licenseToken) return null;   // chưa liên kết → bỏ qua (chạy local)
   try {
-    const r = await fetch((cfg.webBase || 'https://toolmktai.com').replace(/\/$/, '') + path, {
-      method, headers: { authorization: 'Bearer ' + cfg.licenseToken },
-    });
+    const headers = { authorization: 'Bearer ' + cfg.licenseToken };
+    const opts = { method, headers };
+    if (body !== undefined) { headers['content-type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    const r = await fetch((cfg.webBase || 'https://toolmktai.com').replace(/\/$/, '') + path, opts);
     return { status: r.status, json: await r.json().catch(() => ({})) };
   } catch (e) { return { status: 0, json: { error: String(e?.message || e) }, neterr: true }; }
 }
@@ -126,8 +127,8 @@ async function checkQuota(cfg) {
 }
 
 // Báo đã đăng 1 comment (+1 quota). Trả { ok, quota?, msg }
-async function reportComment(cfg) {
-  const r = await webFetch(cfg, '/api/usage', 'POST');
+async function reportComment(cfg, posted) {
+  const r = await webFetch(cfg, '/api/usage', 'POST', posted ? { posted } : undefined);
   if (!r || r.neterr) return { ok: true };
   if (r.status === 429) return { ok: false, quota: true, msg: r.json?.error || 'Hết lượt' };
   return { ok: r.status < 300, remaining: r.json?.remaining };
@@ -828,8 +829,11 @@ async function commitComment(item) {
         while (commentHistory.length > 500) commentHistory.pop();
         await chrome.storage.local.set({ commentHistory });
       } catch {}
-      // Báo +1 quota lên web (nếu liên kết) + cập nhật trạng thái
-      const rep = await reportComment(cfg);
+      // Báo +1 quota lên web (nếu liên kết) + lưu lịch sử "Đã đăng" vào DB + cập nhật trạng thái
+      const rep = await reportComment(cfg, {
+        mode: 'comment', groupId: item.groupId || '', postId: item.postId || '',
+        content: item.comment || '', link: item.link || '', permalink: item.permalink || '',
+      });
       if (!rep.ok && rep.quota) await pushLog('error', `⚠ ${rep.msg}`);
       await refreshLicense(cfg);
     } else {
@@ -922,7 +926,8 @@ async function postToGroup(groupId, message, link, opts = {}) {
 
   if (res.ok) {
     await pushLog('success', `✓ Đã đăng bài vào ${gName}${photoIds.length ? ` (${photoIds.length} ảnh)` : ''}`);
-    await reportComment(cfg); await refreshLicense(cfg);
+    await reportComment(cfg, { mode: 'post', groupId, groupName: gName, content: message || '', link: link || '', permalink: res.postUrl || '' });
+    await refreshLicense(cfg);
     try {
       const { commentHistory = [] } = await chrome.storage.local.get('commentHistory');
       commentHistory.unshift({ postId: '', groupId, productName: null, link: link || null, comment: message, permalink: res.postUrl, score: null, mode: 'post', time: Date.now() });

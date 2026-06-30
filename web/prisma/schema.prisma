@@ -26,6 +26,24 @@ model User {
   subscription  Subscription?
   payments      Payment[]
   usage         DailyUsage[]
+  posted        PostedComment[]
+}
+
+// ── Lịch sử đã đăng (comment/bài) — bền qua đổi máy/xoá cache, admin xem được ──
+model PostedComment {
+  id        String   @id @default(cuid())
+  userId    String
+  mode      String   @default("comment") // comment | post
+  groupId   String?
+  groupName String?
+  postId    String?
+  content   String   @db.Text
+  link      String?
+  permalink String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
 
 // ── Quota theo ngày (free 10 comment/ngày) ──
