@@ -45,7 +45,7 @@ Chủ shop online, người làm affiliate/tiếp thị, freelancer cần nghiê
 ★ LƯU Ý SỬ DỤNG CÓ TRÁCH NHIỆM
 Hãy tuân thủ Điều khoản của Facebook và quy định cộng đồng của từng nhóm. Công cụ hỗ trợ bạn ra quyết định nhanh hơn; bạn chịu trách nhiệm về nội dung mình đăng. Đặt giãn cách hợp lý, tránh spam.
 
-Hỗ trợ: <email/website của bạn>
+Hỗ trợ: tronghoabg@gmail.com
 Chính sách quyền riêng tư: https://toolmktai.com/privacy
 ```
 

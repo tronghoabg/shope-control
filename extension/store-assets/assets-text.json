@@ -1,0 +1,26 @@
+{
+  "promoSmall": {
+    "l1": "Tìm khách hàng",
+    "l2": "trên Facebook",
+    "sub": "Trợ lý AI cho người bán hàng"
+  },
+  "marquee": {
+    "l1": "Tìm khách hàng tiềm năng trên Facebook",
+    "l2": "bằng trí tuệ nhân tạo",
+    "sub": "Phân tích nhóm & bài đăng   •   Gợi ý nội dung   •   Bạn toàn quyền duyệt"
+  },
+  "shots": [
+    {
+      "title": ["Phân tích nhóm Facebook", "bằng AI"],
+      "bullets": ["Chấm điểm độ phù hợp của từng nhóm", "Lọc nhanh nhóm tiềm năng theo lĩnh vực", "Tiết kiệm hàng giờ dò thủ công"]
+    },
+    {
+      "title": ["Tìm bài đăng có", "khách hàng tiềm năng"],
+      "bullets": ["AI đọc và đánh giá từng bài viết", "Phát hiện người đang hỏi mua, cần tư vấn", "Gợi ý nội dung tương tác phù hợp"]
+    },
+    {
+      "title": ["Bạn toàn quyền", "kiểm soát"],
+      "bullets": ["Mọi nội dung đều cần bạn duyệt", "Nút Dừng cho mọi thao tác", "Đặt giãn cách an toàn, tránh spam"]
+    }
+  ]
+}

@@ -182,6 +182,7 @@ export default async function Home() {
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-6 py-8 text-xs text-slate-600 sm:flex-row">
           <Logo size={7} />
           <p>© ToolMKT AI · Bạn tự chịu trách nhiệm tuân thủ điều khoản của Facebook &amp; Shopee.</p>
+          <a href="/privacy" className="text-slate-400 hover:text-white hover:underline">Chính sách quyền riêng tư</a>
         </div>
       </footer>
     </div>
