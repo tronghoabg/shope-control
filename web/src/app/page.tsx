@@ -44,8 +44,8 @@ export default async function Home() {
           <Logo />
           <nav className="flex items-center gap-1 sm:gap-3">
             <a href="#tinh-nang" className="hidden rounded-lg px-3 py-2 text-sm text-slate-300 hover:text-white md:block">Tính năng</a>
-            <a href="#quy-trinh" className="hidden rounded-lg px-3 py-2 text-sm text-slate-300 hover:text-white md:block">Quy trình</a>
             <a href="#pricing" className="hidden rounded-lg px-3 py-2 text-sm text-slate-300 hover:text-white md:block">Bảng giá</a>
+            <a href="/cai-dat" className="hidden rounded-lg px-3 py-2 text-sm text-slate-300 hover:text-white md:block">Cài đặt</a>
             <a href="#faq" className="hidden rounded-lg px-3 py-2 text-sm text-slate-300 hover:text-white md:block">FAQ</a>
             <LinkBtn href="/app" variant="default">Mở App</LinkBtn>
             {session ? <LinkBtn href="/dashboard" variant="primary">Dashboard</LinkBtn>
@@ -75,6 +75,7 @@ export default async function Home() {
             </a>
             <LinkBtn href="/app" variant="default" className="px-6 py-3 text-base">Mở công cụ <ArrowRight size={16} /></LinkBtn>
           </div>
+          <a href="/cai-dat" className="mt-3 inline-block text-sm text-indigo-400 hover:underline">Xem hướng dẫn cài đặt chi tiết →</a>
           <div className="mt-5 flex flex-wrap justify-center gap-x-5 gap-y-1 text-xs text-slate-500">
             {[`Miễn phí ${PLANS.free.dailyActions} comment+bài/ngày`, 'Không cần thẻ', 'Không cần API key'].map(t => (
               <span key={t} className="inline-flex items-center gap-1"><Check size={13} className="text-emerald-400" /> {t}</span>
@@ -129,7 +130,7 @@ export default async function Home() {
         </div>
         <div className="mt-8 flex justify-center gap-3">
           <a download href="/extension.zip" className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-5 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-700"><Download size={16} /> Tải Extension</a>
-          <LinkBtn href="/app" variant="primary">Mở công cụ <ArrowRight size={16} /></LinkBtn>
+          <LinkBtn href="/cai-dat" variant="primary">Hướng dẫn chi tiết <ArrowRight size={16} /></LinkBtn>
         </div>
       </section>
 
