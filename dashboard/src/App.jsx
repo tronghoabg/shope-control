@@ -68,6 +68,13 @@ const NAV = [
   { key: 'guide', label: 'Hướng dẫn', icon: IconHelp, render: (goto) => <Guide goto={goto} /> },
   { key: 'settings', label: 'Cài đặt', icon: IconSettings, render: () => <Settings /> },
 ]
+const NAV_BY_KEY = Object.fromEntries(NAV.map(n => [n.key, n]))
+const SECTIONS = [
+  { title: null, keys: ['overview'] },
+  { title: 'Bán hàng', keys: ['discover', 'groups', 'postgroups', 'queue'] },
+  { title: 'Dữ liệu', keys: ['saved', 'posted', 'catalog', 'linktool'] },
+  { title: 'Hệ thống', keys: ['logs', 'guide', 'settings'] },
+]
 
 // Chip trạng thái kết nối ở header (xanh = ok, đỏ = chưa). Có onClick thì bấm được.
 function StatusChip({ ok, icon: Icon, label, title, onClick }) {
@@ -119,24 +126,32 @@ export default function App() {
           </div>
         </div>
 
-        <nav className="mt-2 flex flex-col gap-1 px-2">
-          {NAV.map(item => {
-            const locked = !aiReady && item.key !== 'settings'
-            const active = page === item.key
-            return (
-              <button key={item.key} disabled={locked} onClick={() => setPage(item.key)}
-                className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors disabled:opacity-40
-                  ${active ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>
-                <item.icon size={18} />
-                <span className="flex-1 text-left">{item.label}</span>
-                {item.key === 'queue' && queueCount > 0 && (
-                  <span className="grid h-5 min-w-5 place-items-center rounded-full bg-orange-500 px-1 text-[11px] font-bold text-white">{queueCount}</span>
-                )}
-                {item.key === 'settings' && !aiReady && <span className="rounded bg-red-500/20 px-1.5 text-[10px] font-semibold text-red-400">cần</span>}
-                {locked && <IconLock size={13} className="opacity-50" />}
-              </button>
-            )
-          })}
+        <nav className="mt-1 flex-1 overflow-y-auto px-2 pb-2">
+          {SECTIONS.map((sec, si) => (
+            <div key={si} className={si > 0 ? 'mt-3' : 'mt-1'}>
+              {sec.title && <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600">{sec.title}</div>}
+              <div className="flex flex-col gap-0.5">
+                {sec.keys.map(k => {
+                  const item = NAV_BY_KEY[k]
+                  const locked = !aiReady && item.key !== 'settings'
+                  const active = page === item.key
+                  return (
+                    <button key={item.key} disabled={locked} onClick={() => setPage(item.key)}
+                      className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors disabled:opacity-40
+                        ${active ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-900/40' : 'text-slate-300 hover:bg-slate-800'}`}>
+                      <item.icon size={18} />
+                      <span className="flex-1 text-left">{item.label}</span>
+                      {item.key === 'queue' && queueCount > 0 && (
+                        <span className="grid h-5 min-w-5 place-items-center rounded-full bg-orange-500 px-1 text-[11px] font-bold text-white">{queueCount}</span>
+                      )}
+                      {item.key === 'settings' && !aiReady && <span className="rounded bg-red-500/20 px-1.5 text-[10px] font-semibold text-red-400">cần</span>}
+                      {locked && <IconLock size={13} className="opacity-50" />}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         <AccountBox account={account} onManage={() => setPage('settings')} />
