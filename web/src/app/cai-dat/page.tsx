@@ -1,7 +1,11 @@
 import { Logo, Card, LinkBtn } from '@/components/ui'
 import { Download, FolderOpen, Settings2, ToggleRight, FolderInput, Rocket, AlertTriangle, ArrowLeft, ExternalLink } from 'lucide-react'
 
-export const metadata = { title: 'Hướng dẫn cài đặt Extension — ToolMKT AI' }
+export const metadata = {
+  title: 'Hướng dẫn cài đặt Extension',
+  description: 'Hướng dẫn cài extension ToolMKT AI lên Chrome qua file zip: tải, giải nén, bật Developer mode và Load unpacked — kèm khắc phục sự cố.',
+  alternates: { canonical: '/cai-dat' },
+}
 
 const STEPS = [
   { Icon: Download, t: 'Tải file extension', d: <>Bấm nút <b>Tải Extension</b> bên dưới để tải <code className="rounded bg-slate-800 px-1 text-slate-300">extension.zip</code> về máy.</> },
