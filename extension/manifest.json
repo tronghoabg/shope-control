@@ -28,6 +28,8 @@
     "https://facebook.com/*",
     "https://m.facebook.com/*",
     "https://mbasic.facebook.com/*",
+    "https://adsmanager.facebook.com/*",
+    "https://business.facebook.com/*",
     "https://graph.facebook.com/*",
     "https://upload.facebook.com/*",
     "https://shopee.vn/*",

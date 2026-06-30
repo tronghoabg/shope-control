@@ -113,7 +113,7 @@ export default function Groups() {
         {groups.length === 0 ? (
           <Empty icon={IconUsersGroup}>
             Chưa có dữ liệu. Bấm <b>Quét &amp; chấm điểm</b> để lấy nhóm đã tham gia + AI đánh giá.
-            {!aiReady && <div className="mt-1 text-amber-400">Cần đăng nhập tài khoản (dùng AI hệ thống) hoặc nhập API key riêng — trang Cài đặt.</div>}
+            {!aiReady && <div className="mt-1 text-amber-400">Cần đăng nhập tài khoản để dùng AI hệ thống (góc dưới trái).</div>}
           </Empty>
         ) : (
           <div className="max-h-[30rem] divide-y divide-slate-800 overflow-y-auto">

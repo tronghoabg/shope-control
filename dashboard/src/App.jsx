@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   IconLayoutDashboard, IconUsersGroup, IconListCheck, IconShoppingCart,
-  IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink, IconUserCircle, IconCrown, IconSend, IconBookmark, IconHelp,
+  IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink, IconUserCircle, IconCrown, IconSend, IconBookmark, IconHelp, IconLogout, IconShieldLock, IconBuildingStore,
 } from '@tabler/icons-react'
 
 const PLAN_NAME = { free: 'Miễn phí', basic: 'Cơ bản', pro: 'Chuyên', business: 'Đại lý' }
@@ -28,6 +28,7 @@ function AccountBox({ account, onManage }) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium text-slate-100">{a.name || a.email}</div>
+          <div className="truncate text-[11px] text-slate-500">{a.email}</div>
           <div className="flex items-center gap-1.5 text-[11px]">
             <span className={pro ? 'font-medium text-amber-400' : 'text-slate-500'}>{PLAN_NAME[a.plan] || 'Miễn phí'}</span>
             <span className="text-slate-600">·</span>
@@ -35,15 +36,20 @@ function AccountBox({ account, onManage }) {
           </div>
         </div>
       </button>
+      <a href="/api/auth/signout?callbackUrl=/"
+        className="mt-1.5 flex items-center justify-center gap-2 rounded-lg border border-slate-800 px-2 py-1.5 text-xs font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-200">
+        <IconLogout size={14} /> Đăng xuất
+      </a>
     </div>
   )
 }
 import { useShope } from './ShopeContext.jsx'
-import { Btn, Badge, Spinner, LogoMark } from './ui.jsx'
+import { Spinner, LogoMark } from './ui.jsx'
 import LogPanel from './LogPanel.jsx'
 import Overview from './pages/Overview.jsx'
 import Discover from './pages/Discover.jsx'
 import Groups from './pages/Groups.jsx'
+import Pages from './pages/Pages.jsx'
 import PostGroups from './pages/PostGroups.jsx'
 import Saved from './pages/Saved.jsx'
 import Queue from './pages/Queue.jsx'
@@ -52,12 +58,14 @@ import Catalog from './pages/Catalog.jsx'
 import LinkTool from './pages/LinkTool.jsx'
 import Logs from './pages/Logs.jsx'
 import Settings from './pages/Settings.jsx'
+import Account from './pages/Account.jsx'
 import Guide from './pages/Guide.jsx'
 
 const NAV = [
   { key: 'overview', label: 'Tổng quan', icon: IconLayoutDashboard, render: (goto) => <Overview goto={goto} /> },
   { key: 'discover', label: 'Tham gia nhóm', icon: IconCompass, render: () => <Discover /> },
   { key: 'groups', label: 'Nhóm của tôi', icon: IconUsersGroup, render: () => <Groups /> },
+  { key: 'pages', label: 'Page mục tiêu', icon: IconBuildingStore, render: (goto) => <Pages goto={goto} /> },
   { key: 'postgroups', label: 'Đăng bài nhóm', icon: IconSend, render: () => <PostGroups /> },
   { key: 'saved', label: 'Đã lưu', icon: IconBookmark, render: () => <Saved /> },
   { key: 'queue', label: 'Comment dạo', icon: IconListCheck, render: () => <Queue /> },
@@ -67,11 +75,13 @@ const NAV = [
   { key: 'logs', label: 'Nhật ký', icon: IconHistory, render: () => <Logs /> },
   { key: 'guide', label: 'Hướng dẫn', icon: IconHelp, render: (goto) => <Guide goto={goto} /> },
   { key: 'settings', label: 'Cài đặt', icon: IconSettings, render: () => <Settings /> },
+  // 'account' không nằm trong SECTIONS → không hiện ở sidebar, chỉ mở khi bấm ô tài khoản
+  { key: 'account', label: 'Tài khoản', icon: IconUserCircle, render: () => <Account /> },
 ]
 const NAV_BY_KEY = Object.fromEntries(NAV.map(n => [n.key, n]))
 const SECTIONS = [
   { title: null, keys: ['overview'] },
-  { title: 'Bán hàng', keys: ['discover', 'groups', 'postgroups', 'queue'] },
+  { title: 'Bán hàng', keys: ['discover', 'groups', 'pages', 'postgroups', 'queue'] },
   { title: 'Dữ liệu', keys: ['saved', 'posted', 'catalog', 'linktool'] },
   { title: 'Hệ thống', keys: ['logs', 'guide', 'settings'] },
 ]
@@ -81,8 +91,8 @@ function StatusChip({ ok, icon: Icon, label, title, onClick }) {
   const cls = ok ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
   return (
     <button type="button" onClick={onClick || undefined} title={title} disabled={!onClick}
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 ${cls} ${onClick ? 'cursor-pointer hover:brightness-125' : 'cursor-default'}`}>
-      <Icon size={14} />
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${cls} ${onClick ? 'cursor-pointer hover:brightness-125' : 'cursor-default'}`}>
+      <Icon size={13} />
       <span className="hidden sm:inline">{label}</span>
       <span className={`h-1.5 w-1.5 rounded-full ${ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
     </button>
@@ -100,33 +110,110 @@ export default function App() {
 
   useEffect(() => { if (connected && s && !aiReady) setPage('settings') }, [connected, s, aiReady])
 
+  // Sau vài giây vẫn chưa kết nối → coi như chưa cài extension (thay vì spinner treo mãi)
+  const [notInstalled, setNotInstalled] = useState(false)
+  useEffect(() => {
+    if (connected && s) { setNotInstalled(false); return }
+    const t = setTimeout(() => setNotInstalled(true), 6000)
+    return () => clearTimeout(t)
+  }, [connected, s])
+
   // Chưa kết nối được extension → màn hình hướng dẫn rõ ràng (thay vì các trang treo "Đang tải…")
   if (!connected || !s) {
+    // Đang trong vài giây đầu: hiện spinner "đang kết nối"
+    if (!notInstalled) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+          <LogoMark size={64} />
+          <div className="text-lg font-bold text-slate-100">ToolMKT AI</div>
+          <div className="flex items-center gap-2 text-sm text-slate-400"><Spinner className="text-slate-400" /> Đang kết nối extension…</div>
+        </div>
+      )
+    }
+    // Quá thời gian → chưa cài đặt extension, dẫn link tải
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
         <LogoMark size={64} />
-        <div className="text-lg font-bold text-slate-100">ToolMKT AI</div>
-        <div className="flex items-center gap-2 text-sm text-slate-400"><Spinner className="text-slate-400" /> Đang kết nối extension…</div>
-        <div className="max-w-md text-sm leading-relaxed text-slate-500">
-          Nếu chờ lâu: mở <code className="rounded bg-slate-800 px-1 text-slate-300">chrome://extensions</code> → bật <b>Developer mode</b> → <b>Load unpacked</b> thư mục <code className="rounded bg-slate-800 px-1 text-slate-300">extension/</code> (hoặc bấm ⟳ Reload), rồi <b>F5</b> trang này.
+        <div className="text-lg font-bold text-slate-100">Chưa cài đặt extension</div>
+        <div className="max-w-md text-sm leading-relaxed text-slate-400">
+          Không tìm thấy extension <b>ToolMKT AI</b> trên trình duyệt. Hãy tải và cài đặt extension để bắt đầu sử dụng.
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <a download href="/extension.zip"
+            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-900/40 hover:bg-indigo-500">
+            <IconPlugConnected size={18} /> Tải Extension (Chrome)
+          </a>
+          <a href="/cai-dat"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-5 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800">
+            Hướng dẫn cài đặt
+          </a>
+        </div>
+        <div className="max-w-md text-xs leading-relaxed text-slate-500">
+          Đã cài rồi? Mở <code className="rounded bg-slate-800 px-1 text-slate-300">chrome://extensions</code> → bật <b>Developer mode</b> → <b>Load unpacked</b> thư mục <code className="rounded bg-slate-800 px-1 text-slate-300">extension/</code> (hoặc bấm ⟳ Reload), rồi <b>F5</b> trang này.
         </div>
       </div>
     )
   }
 
   return (
-    <div className="flex h-full">
-      {/* ════ SIDEBAR ════ */}
-      <aside className="flex w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-900">
-        <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-slate-800 px-4">
-          <LogoMark size={32} />
-          <div>
-            <div className="text-sm font-bold leading-tight text-slate-100">ToolMKT AI</div>
-            <div className="text-[10px] text-slate-500">Tìm khách &amp; bán hàng bằng AI</div>
-          </div>
+    <div className="flex h-full flex-col">
+      {/* ════ TOP HEADER (full khung) ════ */}
+      <header className="grid h-14 shrink-0 grid-cols-3 items-center border-b border-slate-800 bg-slate-900/70 px-5">
+        {/* Trái: trạng thái kết nối */}
+        <div className="flex items-center gap-2">
+          <StatusChip ok={connected} icon={connected ? IconPlugConnected : IconPlugConnectedX} label="Extension"
+            title={connected ? 'Extension đã kết nối' : 'Chưa kết nối extension — Reload extension + F5'} />
+          <StatusChip ok={!!conn?.connected} icon={IconBrandFacebook} label="Facebook"
+            title={conn?.connected ? `Facebook: ${conn.name || conn.id}` : 'Chưa kết nối Facebook — bấm để kết nối'}
+            onClick={conn?.connected ? null : () => connectFb(false)} />
+          <StatusChip ok={!!shopee?.loggedIn} icon={IconShoppingCart} label="Shopee"
+            title={shopee?.loggedIn ? 'Shopee đã đăng nhập' : shopee?.hasTab ? 'Có tab Shopee nhưng chưa đăng nhập — bấm để mở' : 'Chưa mở Shopee — bấm để mở & đăng nhập'}
+            onClick={shopee?.loggedIn ? null : () => window.open('https://shopee.vn', '_blank')} />
         </div>
 
-        <nav className="mt-1 flex-1 overflow-y-auto px-2 pb-2">
+        {/* Giữa: logo + thương hiệu (bấm về trang chủ) */}
+        <a href="https://toolmktai.com" title="toolmktai.com — Về trang chủ"
+          className="flex items-center justify-center gap-2 transition hover:opacity-90">
+          <LogoMark size={28} />
+          <div className="text-left leading-tight">
+            <div className="bg-gradient-to-r from-orange-400 via-rose-400 to-violet-400 bg-clip-text text-base font-extrabold tracking-tight text-transparent">
+              ToolMKT AI
+            </div>
+            <div className="text-[10px] font-medium text-slate-400">
+              toolmktai.com · Tìm khách hàng trên Facebook
+            </div>
+          </div>
+        </a>
+
+        {/* Phải: tài khoản Facebook (avatar FB) */}
+        <div className="flex items-center justify-end gap-2">
+          {!showLogs && (
+            <button onClick={() => setShowLogs(true)} title="Hiện nhật ký"
+              className="flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-700">
+              <IconHistory size={14} />{logCount ? ` ${logCount}` : ''}
+            </button>
+          )}
+          {conn?.connected ? (
+            <div title={`Facebook: ${conn.name || conn.id}`}
+              className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-800/60 py-0.5 pl-0.5 pr-2.5">
+              {conn.picture
+                ? <img src={conn.picture} alt="" referrerPolicy="no-referrer" className="h-6 w-6 rounded-full object-cover" />
+                : <div className="grid h-6 w-6 place-items-center rounded-full bg-[#1877F2] text-white"><IconBrandFacebook size={13} /></div>}
+              <span className="max-w-[130px] truncate text-xs font-medium text-slate-200">{conn.name || conn.id}</span>
+            </div>
+          ) : (
+            <button onClick={() => connectFb(false)} disabled={!connected}
+              className="inline-flex items-center gap-1.5 rounded-full bg-[#1877F2] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-[#1668d8] disabled:opacity-40">
+              <IconBrandFacebook size={14} /> Kết nối Facebook
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+      {/* ════ SIDEBAR ════ */}
+      <aside className="flex w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-900">
+        <nav className="mt-2 flex-1 overflow-y-auto px-2 pb-2">
           {SECTIONS.map((sec, si) => (
             <div key={si} className={si > 0 ? 'mt-3' : 'mt-1'}>
               {sec.title && <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600">{sec.title}</div>}
@@ -152,47 +239,24 @@ export default function App() {
               </div>
             </div>
           ))}
+
+          {account?.isAdmin && (
+            <div className="mt-3">
+              <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600">Quản trị</div>
+              <a href="/admin"
+                className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-amber-400 transition-colors hover:bg-amber-500/10">
+                <IconShieldLock size={18} />
+                <span className="flex-1 text-left">Admin</span>
+              </a>
+            </div>
+          )}
         </nav>
 
-        <AccountBox account={account} onManage={() => setPage('settings')} />
+        <AccountBox account={account} onManage={() => setPage('account')} />
       </aside>
 
-      {/* ════ RIGHT: Header · Container · Footer ════ */}
+      {/* ════ RIGHT: Container · Footer ════ */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* ── HEADER ── */}
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-800 bg-slate-900/50 px-5">
-          <div className="flex items-center gap-1.5 text-sm">
-            <StatusChip ok={connected} icon={connected ? IconPlugConnected : IconPlugConnectedX} label="Extension"
-              title={connected ? 'Extension đã kết nối' : 'Chưa kết nối extension — Reload extension + F5'} />
-            <StatusChip ok={!!conn?.connected} icon={IconBrandFacebook} label="Facebook"
-              title={conn?.connected ? `Facebook: ${conn.name || conn.id}` : 'Chưa kết nối Facebook — bấm để kết nối'}
-              onClick={conn?.connected ? null : () => connectFb(false)} />
-            <StatusChip ok={!!shopee?.loggedIn} icon={IconShoppingCart} label="Shopee"
-              title={shopee?.loggedIn ? 'Shopee đã đăng nhập' : shopee?.hasTab ? 'Có tab Shopee nhưng chưa đăng nhập — bấm để mở' : 'Chưa mở Shopee — bấm để mở & đăng nhập'}
-              onClick={shopee?.loggedIn ? null : () => window.open('https://shopee.vn', '_blank')} />
-          </div>
-          <div className="flex items-center gap-3">
-            {conn?.connected ? (
-              <div className="flex items-center gap-2">
-                {conn.picture
-                  ? <img src={conn.picture} alt="" className="h-7 w-7 rounded-full" />
-                  : <div className="grid h-7 w-7 place-items-center rounded-full bg-blue-600 text-white"><IconBrandFacebook size={15} /></div>}
-                <span className="text-sm font-medium text-slate-200">{conn.name || conn.id}</span>
-              </div>
-            ) : (
-              <Btn variant="primary" size="sm" icon={IconBrandFacebook} onClick={() => connectFb(false)} disabled={!connected}>
-                Kết nối Facebook
-              </Btn>
-            )}
-            {!showLogs && (
-              <button onClick={() => setShowLogs(true)} title="Hiện nhật ký"
-                className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-700">
-                <IconHistory size={15} /> Nhật ký{logCount ? ` (${logCount})` : ''}
-              </button>
-            )}
-          </div>
-        </header>
-
         {/* ── CONTAINER ── */}
         <div className="flex min-h-0 flex-1">
           <main className="flex-1 overflow-y-auto bg-slate-950 p-6">
@@ -211,6 +275,7 @@ export default function App() {
             <a href="https://zalo.me/g/fsjwncgaupa915h891zx" target="_blank" rel="noreferrer" className="font-medium text-emerald-400 hover:text-emerald-300">💬 Nhóm hỗ trợ Zalo</a>
           </div>
         </footer>
+      </div>
       </div>
     </div>
   )

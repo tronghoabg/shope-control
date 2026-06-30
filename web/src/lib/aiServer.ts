@@ -1,6 +1,8 @@
 import { prisma } from './prisma'
-import { vnDateKey } from './quota'
-import { AiConfig } from './aiConfig'
+import { vnDateKey, getActivePlan } from './quota'
+import { AiConfig, getAiConfig } from './aiConfig'
+import { userFromRequest } from './apiAuth'
+import { PLANS } from './plans'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chống lạm dụng #1: rate-limit theo PHÚT (in-memory — server chạy 1 tiến trình PM2).
@@ -108,4 +110,25 @@ export async function callProviderManaged(cfg: AiConfig, opts: AiOpts): Promise<
 function approxTokens(opts: AiOpts, out: string): number {
   const inChars = (opts.system?.length || 0) + opts.messages.reduce((s, m) => s + m.content.length, 0)
   return Math.ceil((inChars + out.length) / 4) // ~4 ký tự/token
+}
+
+// ── Cổng chung cho mọi yêu cầu AI managed: auth + ban + rate-limit + input + cap/ngày + key hệ thống.
+// Dùng cho cả /api/ai (generic) và /api/ai/task. Trả cfg + userId khi hợp lệ, hoặc lỗi để route trả về.
+export type Guard =
+  | { ok: true; cfg: AiConfig; userId: string }
+  | { ok: false; status: number; error: string; code?: string }
+
+export async function guardManaged(req: Request, opts: { system?: string; messages: { content: string }[] }): Promise<Guard> {
+  const user = await userFromRequest(req)
+  if (!user) return { ok: false, status: 401, error: 'unauthorized' }
+  if (user.bannedAt) return { ok: false, status: 403, error: 'Tài khoản bị tạm khoá AI hệ thống (nghi lạm dụng). Liên hệ admin.', code: 'BANNED' }
+  if (!rateLimitOk(user.id)) return { ok: false, status: 429, error: 'Quá nhiều yêu cầu, chậm lại chút nhé.', code: 'RATE_LIMIT' }
+  if (inputCharCount(opts) > MAX_INPUT_CHARS) return { ok: false, status: 413, error: 'Nội dung quá dài.', code: 'TOO_LARGE' }
+  const plan = await getActivePlan(user.id)
+  const cap = PLANS[plan].aiDailyCap
+  const used = await aiUsedToday(user.id)
+  if (used >= cap) return { ok: false, status: 429, error: `Đã đạt trần ${cap} lượt AI/ngày của gói. Nâng cấp để dùng tiếp.`, code: 'AI_CAP' }
+  const cfg = await getAiConfig()
+  if (!cfg.key) return { ok: false, status: 503, error: 'AI hệ thống chưa được cấu hình. Vào /admin để nhập API key.', code: 'NO_SYSTEM_KEY' }
+  return { ok: true, cfg, userId: user.id }
 }

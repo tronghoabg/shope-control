@@ -575,4 +575,117 @@ async function fbUploadPhoto(runUpload, creds, dataUrl, name = 'photo.jpg') {
   return String(photoID);
 }
 
-self.ShopeFbApi = { fbFetchJoinedGroups, fbFetchGroupFeed, fbPostComment, fbSearchGroups, fbJoinGroup, fbCreateGroupPost, fbUploadPhoto, FB_GRAPHQL_URL, _gql: gql };
+// ─────────────────────────────────────────────────────────────────────────────
+// 7) PAGE: tìm Page mục tiêu + feed bài của Page (comment dạo trên page)  ✅ doc_id thật
+// ─────────────────────────────────────────────────────────────────────────────
+const PAGE_SEARCH = { FRIENDLY_NAME: 'SearchCometResultsPaginatedResultsQuery', DOC_ID: '27547223741556484' };
+function buildPageSearchVars(text, count, cursor) {
+  const v = buildSearchVars(text, count, cursor);
+  v.args.experience.type = 'PAGES_TAB';   // chỉ khác bản tìm nhóm ở đây
+  return v;
+}
+// Deep-walk gom các Page (SearchProfileViewModel.profile) trong kết quả search.
+function collectPageProfiles(root) {
+  const out = [], seen = new Set();
+  const visit = (o) => {
+    if (!o || typeof o !== 'object') return;
+    if (Array.isArray(o)) { for (const x of o) visit(x); return; }
+    if (o.__typename === 'SearchProfileViewModel' && o.profile && o.profile.id) {
+      const p = o.profile, id = String(p.id);
+      if (!seen.has(id)) {
+        seen.add(id);
+        out.push({
+          pageId: id, name: String(p.name || ''),
+          url: p.url || `https://www.facebook.com/profile.php?id=${id}`,
+          icon: p.profile_picture?.uri || '',
+          snippet: o.primary_snippet_text_with_entities?.text || '',
+        });
+      }
+    }
+    for (const k in o) visit(o[k]);
+  };
+  visit(root);
+  return out;
+}
+async function fbSearchPages(runFetch, creds, keyword, cursor) {
+  const json = await gql(runFetch, creds, PAGE_SEARCH.FRIENDLY_NAME, PAGE_SEARCH.DOC_ID, buildPageSearchVars(keyword, 8, cursor));
+  const pages = collectPageProfiles(json?.data ?? json);
+  return { pages, nextCursor: extractEndCursor(json) };
+}
+
+const PAGE_FEED = { FRIENDLY_NAME: 'ProfileCometTimelineFeedRefetchQuery', DOC_ID: '27394782800205609' };
+function buildPageFeedVars(pageId, cursor, count) {
+  return {
+    afterTime: null, beforeTime: null, count: count || 5, cursor: cursor || null,
+    feedLocation: 'TIMELINE', feedbackSource: 0, focusCommentID: null,
+    memorializedSplitTimeFilter: null, omitPinnedPost: true,
+    postedBy: { group: 'OWNER' }, privacy: null,
+    privacySelectorRenderLocation: 'COMET_STREAM', referringStoryRenderLocation: null,
+    renderLocation: 'timeline', scale: 1, stream_count: 1, taggedInOnly: null,
+    trackingCode: null, useDefaultActor: false, id: String(pageId),
+    __relay_internal__pv__GHLShouldChangeAdIdFieldNamerelayprovider: true,
+    __relay_internal__pv__GHLShouldChangeSponsoredDataFieldNamerelayprovider: true,
+    __relay_internal__pv__CometFeedStory_enable_reactor_facepilerelayprovider: false,
+    __relay_internal__pv__CometFeedStory_enable_social_bubblesrelayprovider: false,
+    __relay_internal__pv__CometFeedStory_enable_post_permalink_white_space_clickrelayprovider: false,
+    __relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider: false,
+    __relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider: false,
+    __relay_internal__pv__IsWorkUserrelayprovider: false,
+    __relay_internal__pv__TestPilotShouldIncludeDemoAdUseCaserelayprovider: false,
+    __relay_internal__pv__FBReels_deprecate_short_form_video_context_gkrelayprovider: true,
+    __relay_internal__pv__FBReels_enable_view_dubbed_audio_type_gkrelayprovider: true,
+    __relay_internal__pv__CometFeedShareMedia_shouldPrefetchShareImagerelayprovider: false,
+    __relay_internal__pv__CometImmersivePhotoCanUserDisable3DMotionrelayprovider: false,
+    __relay_internal__pv__WorkCometIsEmployeeGKProviderrelayprovider: false,
+    __relay_internal__pv__IsMergQAPollsrelayprovider: false,
+    __relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_gkrelayprovider: true,
+    __relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider: false,
+    __relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider: 'AUTO_TRANSLATE',
+    __relay_internal__pv__CometUFIShareActionMigrationrelayprovider: true,
+    __relay_internal__pv__CometUFISingleLineUFIrelayprovider: false,
+    __relay_internal__pv__relay_provider_comet_ufi_ssr_seo_deferrelayprovider: true,
+    __relay_internal__pv__CometUFI_dedicated_comment_routable_dialog_gkrelayprovider: true,
+    __relay_internal__pv__ReelsIFUCard_reelsIFULikeCountrelayprovider: false,
+    __relay_internal__pv__FBReelsIFUTileContent_reelsIFUPlayOnHoverrelayprovider: true,
+    __relay_internal__pv__GroupsCometGYSJFeedItemHeightrelayprovider: 206,
+    __relay_internal__pv__ShouldEnableBakedInTextStoriesrelayprovider: false,
+    __relay_internal__pv__StoriesShouldIncludeFbNotesrelayprovider: false,
+  };
+}
+function parsePageFeed(jsons, pageId) {
+  const arr = Array.isArray(jsons) ? jsons : [jsons];
+  const byId = new Map(); let nextCursor = null;
+  const deepText = (o) => { let best = ''; const v = (x) => { if (!x || typeof x !== 'object') return; if (Array.isArray(x)) { for (const y of x) v(y); return; } if (x.message && typeof x.message.text === 'string' && x.message.text.length > best.length) best = x.message.text; for (const k in x) v(x[k]); }; v(o); return best; };
+  const deepFbId = (o) => { let r = null; const v = (x) => { if (r || !x || typeof x !== 'object') return; if (Array.isArray(x)) { for (const y of x) v(y); return; } if (typeof x.id === 'string' && x.id.startsWith('ZmVlZGJhY2s6')) { r = x.id; return; } if (x.feedback && typeof x.feedback.id === 'string') { r = x.feedback.id; return; } for (const k in x) v(x[k]); }; v(o); return r; };
+  const deepUrl = (o) => { let r = ''; const v = (x) => { if (r || !x || typeof x !== 'object') return; if (Array.isArray(x)) { for (const y of x) v(y); return; } if (typeof x.wwwURL === 'string' && x.wwwURL) { r = x.wwwURL; return; } for (const k in x) v(x[k]); }; v(o); return r; };
+  const walk = (o) => {
+    if (!o || typeof o !== 'object') return;
+    if (Array.isArray(o)) { for (const x of o) walk(x); return; }
+    if (typeof o.post_id === 'string' && /^\d{5,}$/.test(o.post_id)) {
+      const id = o.post_id;
+      if (!byId.has(id)) byId.set(id, { postId: id, feedbackId: null, text: '', permalink: '' });
+      const rec = byId.get(id);
+      rec.feedbackId = rec.feedbackId || deepFbId(o);
+      if (!rec.text) rec.text = deepText(o);
+      if (!rec.permalink) rec.permalink = deepUrl(o);
+    }
+    if (o.page_info && o.page_info.has_next_page && o.page_info.end_cursor) nextCursor = o.page_info.end_cursor;
+    for (const k in o) { const v = o[k]; if (v && typeof v === 'object') walk(v); }
+  };
+  for (const j of arr) walk(j);
+  const posts = [];
+  for (const rec of byId.values()) {
+    if (!rec.text || !rec.feedbackId) continue;
+    posts.push({ postId: rec.postId, feedbackId: rec.feedbackId, text: rec.text, permalink: rec.permalink || `https://www.facebook.com/${pageId}/posts/${rec.postId}/` });
+  }
+  return { posts, nextCursor, rawCount: byId.size, dbg: `nodes=${byId.size}, ok=${posts.length}, dòng=${arr.length}` };
+}
+async function fbFetchPageFeed(runFetch, creds, pageId, cursor, count) {
+  const text = await gqlText(runFetch, creds, PAGE_FEED.FRIENDLY_NAME, PAGE_FEED.DOC_ID, buildPageFeedVars(pageId, cursor, count));
+  const jsons = parseFbJsonAll(text);
+  const err = jsons.find(j => j?.errors?.length)?.errors?.[0]?.message;
+  if (err && jsons.length === 1) throw new Error(err);
+  return parsePageFeed(jsons, pageId);
+}
+
+self.ShopeFbApi = { fbFetchJoinedGroups, fbFetchGroupFeed, fbPostComment, fbSearchGroups, fbJoinGroup, fbCreateGroupPost, fbUploadPhoto, fbSearchPages, fbFetchPageFeed, FB_GRAPHQL_URL, _gql: gql };

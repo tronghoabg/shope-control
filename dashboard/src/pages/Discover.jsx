@@ -102,7 +102,7 @@ export default function Discover() {
 
       {!aiReady && (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-300">
-          Cần nhập API key (trang Cài đặt) để AI gợi ý &amp; chấm điểm nhóm.
+          Cần đăng nhập tài khoản để AI gợi ý &amp; chấm điểm nhóm.
         </div>
       )}
 

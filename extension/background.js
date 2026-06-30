@@ -10,9 +10,7 @@ const TICK_ALARM = 'shope_tick';
 
 // ─── Cấu hình mặc định ───────────────────────────────────────────────────────
 const DEFAULTS = {
-  provider: 'anthropic',      // anthropic | openai | gemini
-  apiKeys: {},                // { anthropic:'', openai:'', gemini:'' } — nhập ở giao diện cài đặt
-  models: {},                 // override model mỗi provider (để trống = mặc định)
+  // AI dùng KEY HỆ THỐNG qua web (/api/ai/task) — không còn provider/key riêng ở extension.
   autoEnabled: false,
   killSwitch: false,
   dailyCap: 30,               // tối đa comment/ngày
@@ -37,10 +35,12 @@ const DEFAULTS = {
 const HARD_AI_ERRORS = new Set(['AI_CAP', 'NO_SYSTEM_KEY', 'BANNED', 'RATE_LIMIT', 'TOO_LARGE', 'UNAUTHORIZED']);
 
 async function getCfg() {
-  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license', 'savedGroupLists', 'savedPosts']);
+  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license', 'savedGroupLists', 'savedPosts', 'targetPages', 'pageSearchResults']);
   return {
     savedGroupLists: s.savedGroupLists || [],   // [{ id, name, groupIds:[], createdAt }]
     savedPosts: s.savedPosts || [],             // [{ id, title, content, link, bgPresetId, createdAt }]
+    targetPages: s.targetPages || [],           // [{ pageId, name, url, icon }] — page mục tiêu comment dạo
+    pageSearchResults: s.pageSearchResults || [], // [{ pageId, name, url, icon, snippet }]
     progress: s.progress || { active: false, phase: '', label: '', current: 0, total: 0, updatedAt: 0 },
     cfg: { ...DEFAULTS, ...(s.cfg || {}) },
     state: { dateKey: '', doneToday: 0, nextActionAt: 0, groupIdx: 0, cursor: null, ...(s.state || {}) },
@@ -146,14 +146,10 @@ async function refreshLicense(cfg) {
   return license;
 }
 
-// Tool BẮT BUỘC có API key AI (để đọc/đánh giá nhóm + bài). Thiếu → chặn sớm với thông báo rõ.
-function hasApiKey(cfg) {
-  return !!((cfg.apiKeys || {})[cfg.provider || 'anthropic'] || '').trim();
-}
+// AI dùng KEY HỆ THỐNG (managed) → bắt buộc đã đăng nhập tài khoản trên web. Thiếu → chặn sớm.
 function requireApiKey(cfg) {
-  const managed = !!(cfg.webBase && cfg.licenseToken);   // đã đăng nhập → dùng AI hệ thống
-  if (!hasApiKey(cfg) && !managed) {
-    const e = new Error('Chưa kích hoạt AI — hãy ĐĂNG NHẬP tài khoản trên web (để dùng AI hệ thống theo gói), hoặc nhập API key riêng.');
+  if (!(cfg.webBase && cfg.licenseToken)) {
+    const e = new Error('Chưa kích hoạt AI — hãy ĐĂNG NHẬP tài khoản trên web để dùng AI hệ thống theo gói.');
     e.code = 'NO_AI'; throw e;
   }
 }
@@ -204,37 +200,55 @@ async function getShopeeConn() {
 // Giải mã chuỗi unicode-escaped trong HTML (vd á → á)
 function decodeJsonStr(s) { try { return JSON.parse('"' + s + '"'); } catch { return s; } }
 
-// SW tự fetch facebook.com bằng cookie user → trích token + dtsg + tên/ID (như smeta).
-// KHÔNG cần mở tab, KHÔNG poll/timer — chỉ chạy khi user mở web app / bấm kết nối.
+// Avatar CÔNG KHAI theo USER_ID — KHÔNG cần token (endpoint /picture của Graph tự redirect ảnh).
+function fbPublicAvatar(id) { return id ? `https://graph.facebook.com/${id}/picture?width=120&height=120` : null; }
+
+// SW tự fetch facebook.com bằng cookie user → trích token EAA + dtsg + tên + USER_ID.
+// CORS: token EAA nằm ở trang Trình quản lý QC (adsmanager/business — KHÁC origin). Để fetch được
+// từ SW, ta (1) thêm 2 host đó vào host_permissions, (2) dùng DNR ghi đè origin/referer/sec-fetch
+// (installFbDnr) cho FB phục vụ đúng trang đăng nhập. Avatar vẫn có endpoint /picture công khai dự phòng.
+// KHÔNG poll/timer — chỉ chạy on-demand (mở app / bấm kết nối) để giảm rủi ro checkpoint.
 async function fetchFbTokenFromSW() {
-  const urls = ['https://www.facebook.com/', 'https://www.facebook.com/me/'];
+  const urls = [
+    'https://adsmanager.facebook.com/adsmanager/manage/campaigns', // ← token EAA nằm ở đây
+    'https://business.facebook.com/latest/home',
+    'https://www.facebook.com/',                                    // ← tên + USER_ID + dtsg
+    'https://www.facebook.com/me/',
+  ];
   const headers = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
   };
+  const acc = { token: null, dtsg: null, name: null, id: null };
   for (const url of urls) {
+    const isTokenPage = /adsmanager\.facebook|business\.facebook/.test(url);
     try {
       const r = await fetch(url, { credentials: 'include', headers, redirect: 'follow' });
       if (!r.ok) continue;
       const html = await r.text();
-      let token = null, dtsg = null, name = null, id = null, m;
-      if ((m = html.match(/"accessToken":"(EAA[^"]+)"/))) token = m[1];
-      if (!token && (m = html.match(/window\.__accessToken="([^"]+)"/))) token = m[1];
-      if ((m = html.match(/"DTSGInitialData",\[\],\{"token":"([^"]+)"/))) dtsg = m[1];
-      if (!dtsg && (m = html.match(/name="fb_dtsg" value="([^"]+)"/))) dtsg = m[1];
-      if ((m = html.match(/"NAME":"([^"]+)","SHORT_NAME"/)) || (m = html.match(/"NAME":"([^"]+)"/))) name = decodeJsonStr(m[1]);
-      if ((m = html.match(/"USER_ID":"(\d+)"/)) || (m = html.match(/"ACCOUNT_ID":"(\d+)"/))) id = m[1];
-      if (token || dtsg || name) {
-        const data = {};
-        if (token) { data.fb_token = token; data.fb_token_time = Date.now(); }
-        if (dtsg) data.fb_dtsg = dtsg;
-        if (id) data.fb_uid = id;
-        if (Object.keys(data).length) await chrome.storage.local.set(data);
-        return { token, dtsg, name, id };
-      }
+      let m;
+      // ── access token (EAA…) — mẫu chính xác trước, mẫu rộng chỉ áp cho trang adsmanager/business ──
+      if (!acc.token && (m = html.match(/window\.__accessToken="(EAA[^"]+)"/))) acc.token = m[1];
+      if (!acc.token && (m = html.match(/"access_token":"(EAA[^"]+)"/))) acc.token = m[1];
+      if (!acc.token && (m = html.match(/"accessToken":"(EAA[^"]+)"/))) acc.token = m[1];
+      if (!acc.token && (m = html.match(/"token":"(EAA[A-Za-z0-9_-]{40,})"/))) acc.token = m[1];
+      if (!acc.token && isTokenPage && (m = html.match(/EAA[A-Za-z0-9]{0,4}[A-Za-z0-9_-]{20,}/))) acc.token = m[0];
+      // ── fb_dtsg (CSRF cho GraphQL) — FB dùng cả "DTSGInitialData" lẫn "DTSGInitData" ──
+      if (!acc.dtsg && (m = html.match(/"DTSGInitialData",\[\],\{"token":"([^"]+)"/))) acc.dtsg = m[1];
+      if (!acc.dtsg && (m = html.match(/\["DTSGInitData",\[\],\{"token":"([^"]+)"/))) acc.dtsg = m[1];
+      if (!acc.dtsg && (m = html.match(/name="fb_dtsg" value="([^"]+)"/))) acc.dtsg = m[1];
+      // ── tên + USER_ID (đủ để hiện tên + avatar công khai) ──
+      if (!acc.name && ((m = html.match(/"NAME":"([^"]+)","SHORT_NAME"/)) || (m = html.match(/"NAME":"([^"]+)"/)))) acc.name = decodeJsonStr(m[1]);
+      if (!acc.id && ((m = html.match(/"USER_ID":"(\d+)"/)) || (m = html.match(/"ACCOUNT_ID":"(\d+)"/)))) acc.id = m[1];
+      if (acc.token && acc.dtsg && acc.id) break;   // đủ token + creds → dừng (đỡ request thừa)
     } catch (e) { /* thử URL kế tiếp */ }
   }
-  return { token: null, dtsg: null, name: null, id: null };
+  const data = {};
+  if (acc.token) { data.fb_token = acc.token; data.fb_token_time = Date.now(); }
+  if (acc.dtsg) data.fb_dtsg = acc.dtsg;
+  if (acc.id) data.fb_uid = acc.id;
+  if (Object.keys(data).length) await chrome.storage.local.set(data);
+  return acc;
 }
 
 // Đảm bảo có creds (dtsg/uid). Thiếu → SW TỰ fetch facebook.com bằng cookie user (không cần tab mở).
@@ -259,44 +273,47 @@ async function fetchMe(token) {
   return null;
 }
 
-// Tự kết nối (smeta-style): LUÔN verify token bằng /me để chắc còn sống + lấy info mới nhất.
-// Token chết / chưa có → SW fetch lại từ facebook.com rồi /me lần nữa.
-async function connectFb() {
+// Tự kết nối: TÁI DÙNG token đã lưu (verify bằng /me lấy tên + avatar). CHỈ khi /me lỗi
+// (token chết / chưa có) MỚI fetch lại token nặng từ adsmanager → đỡ request mỗi lần reload, giảm checkpoint.
+async function connectFb({ forceRefresh = false } = {}) {
   let creds = await getCreds();
-  let user = null;          // chỉ coi là "đã xác thực" khi /me trả về id
-  let htmlInfo = null;      // tên/ID lấy từ HTML (fallback khi không có token)
+  let user = null;          // { id, name, picture }
 
-  // 1) Có token sẵn → /me để xác thực còn sống
-  if (creds.token) {
+  // 1) Đã có token lưu sẵn → /me xác thực CÒN SỐNG + lấy tên/avatar (KHÔNG đụng adsmanager)
+  if (creds.token && !forceRefresh) {
     user = await fetchMe(creds.token);
     if (!user) {
-      // token hết hạn → xoá để lấy lại
+      // token chết → xoá để bước 2 lấy mới
       await chrome.storage.local.remove(['fb_token', 'fb_token_time']);
       await chrome.storage.session.remove(['fb_token']);
+      creds = await getCreds();
     }
   }
 
-  // 2) Chưa xác thực được → SW fetch token mới rồi /me lại
+  // 2) Chưa có token / token chết → CHỈ KHI ĐÓ mới fetch lại token từ adsmanager rồi /me lần nữa
   if (!user) {
     const r = await fetchFbTokenFromSW();
-    if (r.name || r.id) htmlInfo = { name: r.name, id: r.id };
     creds = await getCreds();
     if (creds.token) user = await fetchMe(creds.token);
+    // /me vẫn lỗi nhưng có USER_ID → dựng tên + avatar từ endpoint /picture CÔNG KHAI (không cần token)
+    const id = (user && user.id) || r.id || creds.uid || null;
+    if (!user && id) user = { id, name: r.name || null, picture: fbPublicAvatar(id) };
   }
 
-  // 3) Lưu kết quả — KHÔNG xoá tên cũ khi verify chợt lỗi (giữ qua reload)
+  // avatar dự phòng nếu /me không trả picture
+  if (user && !user.picture && user.id) user.picture = fbPublicAvatar(user.id);
+
+  // 3) Lưu kết quả — giữ tên/avatar cũ nếu lần này trống (badge khỏi mất tên khi mạng chập chờn)
   if (user && user.id) {
-    await chrome.storage.local.set({ fb_user: { ...user, time: Date.now(), verifiedAt: Date.now() } });
-  } else if (htmlInfo && (htmlInfo.name || htmlInfo.id)) {
-    // Có dtsg + tên (đăng comment được) nhưng không lấy được token để /me
     const prev = (await chrome.storage.local.get('fb_user')).fb_user || {};
-    await chrome.storage.local.set({ fb_user: { ...prev, ...htmlInfo, time: Date.now(), verifiedAt: 0 } });
+    await chrome.storage.local.set({
+      fb_user: { ...prev, ...user, name: user.name || prev.name || null, picture: user.picture || prev.picture || null, time: Date.now(), verifiedAt: Date.now() },
+    });
   }
-  // else: không lấy được gì mới → GIỮ NGUYÊN fb_user cũ (không xoá) để badge khỏi mất tên khi mạng chập chờn.
 
   const conn = await getConn();
-  conn.tokenAlive = !!(user && user.id);   // /me thành công
-  if (!conn.connected) conn.note = 'Chưa đăng nhập facebook.com (cùng trình duyệt) hoặc token hết hạn.';
+  conn.tokenAlive = !!(user && user.id);
+  if (!conn.connected) conn.note = 'Chưa đăng nhập facebook.com (cùng trình duyệt này).';
   return conn;
 }
 
@@ -816,12 +833,14 @@ async function commitComment(item) {
       stats = { ...stats, totalCommented: (stats.totalCommented || 0) + 1, lastRunAt: Date.now(), lastError: '' };
       ok = true;
       notify(`Đã comment (${state.doneToday}/${cfg.dailyCap})`, `${item.productName || ''} · điểm ${item.score}`);
-      await pushLog('success', `✓ Đã comment nhóm ${item.groupId || ''}: ${item.productName || 'comment dạo'} (điểm ${item.score})`);
+      const where = item.isPage ? `page ${item.pageName || item.pageId}` : `nhóm ${item.groupId || ''}`;
+      await pushLog('success', `✓ Đã comment ${where}: ${item.productName || 'comment dạo'} (điểm ${item.score})`);
       // Lưu lịch sử kết quả để xem/kiểm chứng
       try {
         const { commentHistory = [] } = await chrome.storage.local.get('commentHistory');
         commentHistory.unshift({
-          postId: item.postId, groupId: item.groupId || '',
+          postId: item.postId, groupId: item.isPage ? (item.pageId || '') : (item.groupId || ''),
+          groupName: item.isPage ? (item.pageName || '') : null,
           productName: item.productName || null, link: item.link || null,
           comment: item.comment, permalink: item.permalink || '', score: item.score ?? null,
           mode: item.mode || cfg.mode, time: Date.now(),
@@ -831,7 +850,8 @@ async function commitComment(item) {
       } catch {}
       // Báo +1 quota lên web (nếu liên kết) + lưu lịch sử "Đã đăng" vào DB + cập nhật trạng thái
       const rep = await reportComment(cfg, {
-        mode: 'comment', groupId: item.groupId || '', postId: item.postId || '',
+        mode: 'comment', groupId: item.isPage ? (item.pageId || '') : (item.groupId || ''),
+        groupName: item.isPage ? (item.pageName || '') : '', postId: item.postId || '',
         content: item.comment || '', link: item.link || '', permalink: item.permalink || '',
       });
       if (!rep.ok && rep.quota) await pushLog('error', `⚠ ${rep.msg}`);
@@ -876,23 +896,10 @@ async function runUploadInFbTab(url, fields, file) {
   throw new Error(r?.error || 'upload_failed');
 }
 
-// ─── AI viết lại nội dung (đa-provider) — chống trùng khi đăng nhiều nhóm ─────
+// ─── AI viết lại nội dung — prompt nằm ở server (task 'rewrite') ──────────────
 async function aiRewrite(text) {
   const { cfg } = await getCfg();
-  const out = await self.ShopeAI.callAI(cfg, {
-    system: 'Bạn là trợ lý viết nội dung marketing tiếng Việt, tự nhiên, đúng trọng tâm.',
-    temperature: 1.0, maxTokens: 700,
-    messages: [{ role: 'user', content:
-`Viết lại đoạn nội dung marketing dưới đây thành MỘT phiên bản KHÁC bằng tiếng Việt:
-- Giữ nguyên ý chính, thông điệp; giữ nguyên số điện thoại, link, hashtag, emoji nếu có.
-- Thay đổi cách diễn đạt/câu chữ để KHÔNG trùng lặp khi đăng vào nhiều nhóm Facebook.
-- Tránh từ ngữ dễ bị Facebook coi là spam/vi phạm.
-- CHỈ trả về nội dung bài viết hoàn chỉnh, KHÔNG thêm lời giải thích, KHÔNG bọc trong dấu ngoặc.
-
-Nội dung gốc:
-${text}` }],
-  });
-  return String(out || '').trim();
+  return String(await self.ShopeAI.aiRewrite(cfg, text) || '').trim();
 }
 
 // ─── Đăng 1 bài vào 1 nhóm (ComposerStoryCreate) ─────────────────────────────
@@ -996,6 +1003,72 @@ function buildCatalogContext(catalog) {
   const names = catalog.slice(0, 25).map(p => p.name);
   const kws = [...new Set(catalog.flatMap(p => p.keywords || []))].slice(0, 50);
   return `Danh mục: ${cats.join(', ')}\nSản phẩm ví dụ: ${names.join('; ')}\nTừ khoá: ${kws.join(', ')}`;
+}
+
+// ─── PAGE: tìm page mục tiêu + comment dạo trên feed page ────────────────────
+async function searchPagesByKeyword(keyword) {
+  const { cfg } = await getCfg();
+  requireApiKey(cfg);
+  const creds = await ensureCreds();
+  if (!creds.dtsg || !creds.uid) throw new Error('Chưa đăng nhập Facebook — hãy đăng nhập facebook.com rồi thử lại.');
+  const kws = String(keyword || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!kws.length) throw new Error('Chưa nhập từ khoá tìm page');
+  await clearCancel();
+  const byId = new Map();
+  let firstError = null;
+  for (const kw of kws) {
+    if (await isCancelled()) { await pushLog('info', '■ Đã dừng tìm page.'); break; }
+    try {
+      const { pages } = await self.ShopeFbApi.fbSearchPages(runFetchInFbTab, creds, kw, null);
+      for (const p of pages) if (p.pageId && !byId.has(p.pageId)) byId.set(p.pageId, p);
+      await pushLog('info', `Tìm page "${kw}": ${pages.length} kết quả`);
+    } catch (e) { firstError = firstError || e; await pushLog('error', `Tìm page "${kw}" lỗi: ${e?.message || e}`); }
+    await new Promise(r => setTimeout(r, 700 + Math.random() * 500));
+  }
+  if (byId.size === 0 && firstError) throw firstError;
+  const results = [...byId.values()];
+  await save({ pageSearchResults: results });
+  return results;
+}
+
+// Quét feed các Page mục tiêu → lọc bài tiềm năng (AI) → soạn comment dạo → đưa vào hàng chờ.
+async function scanPagesOnce() {
+  const { cfg, commentedPosts, targetPages, queue } = await getCfg();
+  requireApiKey(cfg);
+  const pages = targetPages || [];
+  if (!pages.length) throw new Error('Chưa chọn Page mục tiêu');
+  const creds = await ensureCreds();
+  if (!creds.dtsg || !creds.uid) throw new Error('Chưa đăng nhập Facebook');
+  const newQueue = [...queue];
+  let total = 0;
+  for (let pi = 0; pi < pages.length; pi++) {
+    const page = pages[pi];
+    if (await isCancelled()) break;
+    await setProgress({ phase: 'scan', current: pi, total: pages.length, label: `Quét page ${page.name}…` });
+    await pushLog('info', page.name, { group: page.pageId, kind: 'group' });
+    let feed;
+    try { feed = await self.ShopeFbApi.fbFetchPageFeed(runFetchInFbTab, creds, page.pageId, null, cfg.postsPerScan || 5); }
+    catch (e) { await pushLog('error', `Đọc feed page lỗi: ${e?.message || e}`, { group: page.pageId, kind: 'post' }); continue; }
+    await pushLog('info', `Đọc feed: ${feed.dbg}`, { group: page.pageId, kind: 'post' });
+    for (const post of (feed.posts || [])) {
+      if (commentedPosts[post.postId] || newQueue.some(q => q.postId === post.postId)) continue;
+      const ex = String(post.text).replace(/\s+/g, ' ').slice(0, 45);
+      let cls;
+      try { cls = await self.ShopeAI.classifyPost(cfg, post.text, page.name, 'social'); }
+      catch (e) { if (e?.code && HARD_AI_ERRORS.has(e.code)) throw e; continue; }
+      if (!cls.potential || (cls.score || 0) < cfg.minScore) { await pushLog('info', `✕ bỏ qua (${cls.score || 0}đ): "${ex}…"`, { group: page.pageId, kind: 'post' }); continue; }
+      const seed = (cfg.seedContent || '').trim();
+      let sc;
+      try { sc = seed ? await self.ShopeAI.varySeedComment(cfg, post.text, page.name, seed, cfg.tone) : await self.ShopeAI.socialComment(cfg, post.text, page.name, cfg.tone); }
+      catch (e) { if (e?.code && HARD_AI_ERRORS.has(e.code)) throw e; continue; }
+      if (sc.skip || !sc.comment) continue;
+      newQueue.push({ postId: post.postId, feedbackId: post.feedbackId, text: post.text, comment: sc.comment, productName: null, link: null, score: cls.score || 0, mode: 'social', groupId: '', pageId: page.pageId, pageName: page.name, isPage: true, permalink: post.permalink });
+      total++;
+      await pushLog('success', `✓ tiềm năng ${cls.score}đ: "${ex}…" — soạn comment`, { group: page.pageId, kind: 'post' });
+    }
+  }
+  await save({ queue: newQueue });
+  return total;
 }
 
 async function discoverGroups(opts = {}) {
@@ -1188,9 +1261,36 @@ async function installShopeeDnr() {
   } catch (e) { console.warn('installShopeeDnr', e); }
 }
 
+// DNR cho fetch HTML token-page (adsmanager/business) TỪ SW: bỏ Origin = id extension, giả lập
+// một điều hướng trang thật (sec-fetch navigate/document) để FB phục vụ trang đăng nhập có token EAA.
+async function installFbDnr() {
+  const mk = (id, host) => ({
+    id, priority: 1,
+    action: {
+      type: 'modifyHeaders',
+      requestHeaders: [
+        { header: 'origin', operation: 'remove' },
+        { header: 'referer', operation: 'set', value: `https://${host}/` },
+        { header: 'sec-fetch-site', operation: 'set', value: 'same-origin' },
+        { header: 'sec-fetch-mode', operation: 'set', value: 'navigate' },
+        { header: 'sec-fetch-dest', operation: 'set', value: 'document' },
+        { header: 'sec-fetch-user', operation: 'set', value: '?1' },
+      ],
+    },
+    condition: { urlFilter: `||${host}/`, resourceTypes: ['xmlhttprequest', 'other'] },
+  });
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [210, 211],
+      addRules: [mk(210, 'adsmanager.facebook.com'), mk(211, 'business.facebook.com')],
+    });
+  } catch (e) { console.warn('installFbDnr', e); }
+}
+
 async function bootstrap() {
   try { await chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' }); } catch {}
   await installShopeeDnr();
+  await installFbDnr();
   try {
     const { cfg } = await getCfg();
     if (cfg.autoEnabled && !cfg.killSwitch) chrome.alarms.create(TICK_ALARM, { periodInMinutes: 0.5 });
@@ -1240,22 +1340,61 @@ async function handle(request, sendResponse) {
       case 'GET_CATALOG': { const { catalog } = await getCfg(); sendResponse({ ok: true, products: catalog }); break; }
       case 'TEST_AI': {
         const { cfg } = await getCfg();
-        const testCfg = { ...cfg, ...(request.cfg || {}) };
         const t0 = Date.now();
-        const reply = await self.ShopeAI.callAI(testCfg, {
-          messages: [{ role: 'user', content: 'Trả lời đúng 2 từ in hoa: OK SHOPE' }],
-          maxTokens: 20, temperature: 0,
-        });
-        sendResponse({ ok: true, reply: (reply || '').trim(), ms: Date.now() - t0, provider: testCfg.provider });
+        const reply = await self.ShopeAI.testAI(cfg);   // gọi AI hệ thống qua /api/ai/task
+        sendResponse({ ok: true, reply: (reply || '').trim(), ms: Date.now() - t0, provider: 'hệ thống' });
         break;
       }
       case 'DISCOVER_GROUPS': { const g = await discoverGroups(request.opts || {}); sendResponse({ ok: true, count: g.length, groups: g }); break; }
       case 'SUGGEST_NICHES': { const kw = await suggestNiches(); sendResponse({ ok: true, keywords: kw }); break; }
       case 'SEARCH_GROUPS': { const r = await searchGroupsByKeyword(request.keyword); sendResponse({ ok: true, count: r.length, groups: r }); break; }
+      case 'SEARCH_PAGES': { const r = await searchPagesByKeyword(request.keyword); sendResponse({ ok: true, count: r.length, pages: r }); break; }
+      case 'SET_TARGET_PAGES': {
+        const pages = (request.pages || []).map(p => ({ pageId: String(p.pageId), name: p.name || '', url: p.url || '', icon: p.icon || '' }));
+        await save({ targetPages: pages });
+        sendResponse({ ok: true });
+        break;
+      }
+      case 'SCAN_PAGES': {
+        const nPages = (await getCfg()).targetPages.length;
+        await pushLog('info', `▶ Quét ${nPages} page mục tiêu…`);
+        await setProgress({ phase: 'scan', current: 0, total: nPages || 1, label: 'Bắt đầu quét page…' });
+        let total = 0, hardErr = null;
+        try { total = await scanPagesOnce(); }
+        catch (e) {
+          if (e?.code && HARD_AI_ERRORS.has(e.code)) hardErr = e;
+          else { await endProgress('Quét page lỗi'); await pushLog('error', `Quét page lỗi: ${e?.message || e}`); sendResponse({ ok: false, error: String(e?.message || e) }); break; }
+        }
+        await endProgress(`Quét page xong: +${total} bài`);
+        if (hardErr) { await pushLog('error', `⛔ ${hardErr.message}`); sendResponse({ ok: false, error: hardErr.message, code: hardErr.code }); break; }
+        await pushLog('success', `Quét page xong: +${total} bài vào hàng chờ duyệt`);
+        sendResponse({ ok: true, queued: total });
+        break;
+      }
       case 'JOIN_GROUP': { const res = await joinGroupById(request.groupId); sendResponse({ ok: res.ok, error: res.ok ? '' : JSON.stringify(res.errors || 'join_failed') }); break; }
       case 'POST_GROUP': { const r = await postToGroup(request.groupId, request.message || '', request.link || '', { bgPresetId: request.bgPresetId || '', images: request.images || [] }); sendResponse({ ok: r.ok, error: r.ok ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), postUrl: r.postUrl || '', quotaBlocked: !!r.quotaBlocked }); break; }
       case 'AI_REWRITE': { try { const t = await aiRewrite(request.text || ''); sendResponse({ ok: !!t, text: t, error: t ? '' : 'AI không trả về nội dung' }); } catch (e) { sendResponse({ ok: false, error: String(e?.message || e) }); } break; }
       case 'GET_GROUPS': { const { discoveredGroups, groupsSyncedAt } = await getCfg(); sendResponse({ ok: true, groups: discoveredGroups, syncedAt: groupsSyncedAt }); break; }
+      // Khôi phục dữ liệu nhóm từ bản sao trên localStorage của web (vd sau khi cài lại extension).
+      // CHỈ ghi vào key đang TRỐNG để không đè dữ liệu mới hơn của extension.
+      case 'RESTORE_GROUPS': {
+        const cur = await getCfg();
+        const snap = request.snapshot || {};
+        const patch = {};
+        if ((!cur.discoveredGroups?.length) && snap.discoveredGroups?.length) {
+          patch.discoveredGroups = snap.discoveredGroups;
+          patch.groupsSyncedAt = snap.groupsSyncedAt || Date.now();
+        }
+        if ((!cur.searchResults?.length) && snap.searchResults?.length) {
+          patch.searchResults = snap.searchResults;
+          patch.searchAt = snap.searchAt || Date.now();
+        }
+        if ((!cur.savedGroupLists?.length) && snap.savedGroupLists?.length) patch.savedGroupLists = snap.savedGroupLists;
+        if ((!cur.savedPosts?.length) && snap.savedPosts?.length) patch.savedPosts = snap.savedPosts;
+        if (Object.keys(patch).length) await save(patch);
+        sendResponse({ ok: true, restored: Object.keys(patch) });
+        break;
+      }
       case 'SET_TARGETS': {
         const { cfg } = await getCfg();
         await save({ cfg: { ...cfg, groupIds: Array.from(new Set(request.groupIds || [])) } });

@@ -49,7 +49,7 @@ function Round-Rect($g, [int]$x, [int]$y, [int]$w, [int]$h, [int]$r, $brush) {
   $p.CloseFigure(); $g.FillPath($brush, $p); $p.Dispose()
 }
 
-function Text($g, [string]$s, [single]$size, [int]$style, $color, [int]$x, [int]$y) {
+function Text($g, [string]$s, [single]$size, [System.Drawing.FontStyle]$style, $color, [int]$x, [int]$y) {
   $f = New-Object System.Drawing.Font('Segoe UI', $size, $style)
   $b = New-Object System.Drawing.SolidBrush($color)
   $g.DrawString($s, $f, $b, [single]$x, [single]$y)
@@ -93,10 +93,10 @@ Save-Canvas $c 'promo_small_440x280.png'
 # 2) Marquee promo tile 1400x560
 $c = New-Canvas 1400 560
 Fill-Bg $c
-Logo $c 90 70 84 40
-Text $c.g $txt.marquee.l1 56 $bold $cWhite 90 220
-Text $c.g $txt.marquee.l2 56 $bold $cAccent 90 298
-Text $c.g $txt.marquee.sub 26 $reg $cLight 92 420
+Logo $c 90 64 84 40
+Text $c.g $txt.marquee.l1 58 $bold $cWhite 90 210
+Text $c.g $txt.marquee.l2 58 $bold $cAccent 90 296
+Text $c.g $txt.marquee.sub 25 $reg $cLight 92 425
 Save-Canvas $c 'promo_marquee_1400x560.png'
 
 # 3) Screenshots 1280x800 (3 feature graphics)
@@ -105,23 +105,24 @@ foreach ($s in $txt.shots) {
   $c = New-Canvas 1280 800
   Fill-Bg $c
   Logo $c 70 56 52 24
-  $y = 200
-  foreach ($line in $s.title) { Text $c.g $line 46 $bold $cWhite 76 $y; $y += 60 }
-  $y += 40
-  foreach ($b in $s.bullets) {
-    $dot = New-Object System.Drawing.SolidBrush($cAccent)
-    $c.g.FillEllipse($dot, 80, ($y + 14), 14, 14); $dot.Dispose()
-    Text $c.g $b 26 $reg $cLight 110 $y
-    $y += 62
-  }
+  # mock UI card (drawn first, on the right) so text column stays clear of it
   $brCard = New-Object System.Drawing.SolidBrush($cCard)
-  Round-Rect $c.g 730 200 470 470 22 $brCard; $brCard.Dispose()
+  Round-Rect $c.g 838 210 362 460 22 $brCard; $brCard.Dispose()
   $brAcc = New-Object System.Drawing.SolidBrush($cAccent)
-  Round-Rect $c.g 762 232 180 26 8 $brAcc; $brAcc.Dispose()
+  Round-Rect $c.g 868 242 150 24 8 $brAcc; $brAcc.Dispose()
   for ($r = 0; $r -lt 6; $r++) {
     $brBar = New-Object System.Drawing.SolidBrush($cBar)
-    $rw = 406 - ($r % 3) * 40
-    Round-Rect $c.g 762 (290 + $r*58) $rw 30 8 $brBar; $brBar.Dispose()
+    $rw = 302 - ($r % 3) * 34
+    Round-Rect $c.g 868 (298 + $r*56) $rw 28 8 $brBar; $brBar.Dispose()
+  }
+  $y = 210
+  foreach ($line in $s.title) { Text $c.g $line 42 $bold $cWhite 76 $y; $y += 56 }
+  $y += 42
+  foreach ($b in $s.bullets) {
+    $dot = New-Object System.Drawing.SolidBrush($cAccent)
+    $c.g.FillEllipse($dot, 80, ($y + 13), 13, 13); $dot.Dispose()
+    Text $c.g $b 23 $reg $cLight 108 $y
+    $y += 60
   }
   Save-Canvas $c ("screenshot_{0}_1280x800.png" -f $i)
   $i++

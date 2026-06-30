@@ -209,7 +209,7 @@ export default function PostGroups() {
               <IconSparkles size={16} className="text-amber-400" />
               <div>
                 <div className="text-sm font-medium text-slate-200">AI viết lại mỗi nhóm</div>
-                <div className="text-xs text-slate-500">{aiReady ? 'Mỗi nhóm 1 nội dung khác — chống trùng/spam' : 'Cần đăng nhập hoặc nhập API key'}</div>
+                <div className="text-xs text-slate-500">{aiReady ? 'Mỗi nhóm 1 nội dung khác — chống trùng/spam' : 'Cần đăng nhập tài khoản để dùng AI'}</div>
               </div>
             </div>
             <Toggle checked={useAi && aiReady} onChange={v => aiReady && setUseAi(v)} />

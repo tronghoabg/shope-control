@@ -20,6 +20,7 @@ export async function GET() {
     loggedIn: true,
     email: user.email,
     name: user.name,
+    isAdmin: user.role === 'admin',
     apiToken: user.apiToken,
     plan: q.plan,
     isPro: q.isPro,

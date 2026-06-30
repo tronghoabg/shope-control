@@ -6,12 +6,17 @@ export const useShope = () => useContext(Ctx)
 
 let _toastSeq = 0
 
+// Bản sao dữ liệu nhóm lưu vào localStorage của WEB (bền hơn extension — cài lại extension vẫn còn).
+const GROUP_CACHE_KEY = 'tmkt_groups_v1'
+const GROUP_KEYS = ['discoveredGroups', 'groupsSyncedAt', 'searchResults', 'searchAt', 'savedGroupLists', 'savedPosts']
+
 export function ShopeProvider({ children }) {
   const [s, setS] = useState(null)
   const [connected, setConnected] = useState(false)
   const [toasts, setToasts] = useState([])
   const [account, setAccount] = useState(null)   // tài khoản web (từ /api/me)
   const triedConnect = useRef(false)
+  const restoredGroups = useRef(false)
 
   const notify = useCallback((color, message) => {
     const id = ++_toastSeq
@@ -20,8 +25,33 @@ export function ShopeProvider({ children }) {
   }, [])
 
   const refresh = useCallback(async () => {
-    const r = await ext({ type: 'GET_STATE' })
-    if (r?.ok) { setConnected(true); setS(r) } else setConnected(false)
+    let r = await ext({ type: 'GET_STATE' })
+    if (!r?.ok) { setConnected(false); return }
+
+    // Extension trống dữ liệu nhóm nhưng web localStorage có bản sao (vd vừa cài lại extension)
+    // → đẩy bản sao trở lại extension MỘT lần để khôi phục nguồn dữ liệu.
+    if (!restoredGroups.current && !(r.discoveredGroups?.length)) {
+      restoredGroups.current = true
+      try {
+        const cached = JSON.parse(localStorage.getItem(GROUP_CACHE_KEY) || 'null')
+        if (cached?.discoveredGroups?.length) {
+          await ext({ type: 'RESTORE_GROUPS', snapshot: cached })
+          const r2 = await ext({ type: 'GET_STATE' })
+          if (r2?.ok) r = r2
+        }
+      } catch {}
+    }
+
+    // Sao lưu dữ liệu nhóm vào localStorage của web (bền hơn extension)
+    try {
+      if (r.discoveredGroups?.length || r.searchResults?.length || r.savedGroupLists?.length) {
+        const snap = {}
+        for (const k of GROUP_KEYS) if (r[k] != null) snap[k] = r[k]
+        localStorage.setItem(GROUP_CACHE_KEY, JSON.stringify(snap))
+      }
+    } catch {}
+
+    setConnected(true); setS(r)
   }, [])
 
   useEffect(() => {
@@ -86,12 +116,10 @@ export function ShopeProvider({ children }) {
 
   const setCfg = useCallback((cfg) => call({ type: 'SET_CFG', cfg }, { okMsg: 'Đã lưu' }), [call])
 
-  const provider = s?.cfg?.provider || 'anthropic'
-  const hasKey = !!((s?.cfg?.apiKeys || {})[provider] || '').trim()
-  // AI do hệ thống cung cấp → chỉ cần đăng nhập tài khoản là dùng được.
+  // AI do hệ thống cung cấp → chỉ cần đăng nhập tài khoản là dùng được (không còn API key riêng).
   const aiReady = !!account?.loggedIn
 
-  const value = { s, connected, hasKey, aiReady, account, refresh, refreshAccount, connectFb, call, setCfg, notify, toasts }
+  const value = { s, connected, aiReady, account, refresh, refreshAccount, connectFb, call, setCfg, notify, toasts }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
