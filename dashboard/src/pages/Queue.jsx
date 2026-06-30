@@ -8,10 +8,11 @@ import { ext } from '../ext.js'
 import { Btn, Badge, Field, Input, Textarea, Toggle, Card, Empty } from '../ui.jsx'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+const MIN_DELAY = 90   // an toàn checkpoint: không cho nhanh hơn 90s
 const NUM = [
-  { k: 'dailyCap', l: 'Cap/ngày' }, { k: 'minDelaySec', l: 'Delay min (s)' },
-  { k: 'maxDelaySec', l: 'Delay max (s)' }, { k: 'minScore', l: 'Ngưỡng điểm bài' },
-  { k: 'postsPerScan', l: 'Số bài/nhóm mỗi lần tìm' },
+  { k: 'dailyCap', l: 'Cap/ngày', min: 1 }, { k: 'minDelaySec', l: 'Delay min (s) · ≥90', min: MIN_DELAY },
+  { k: 'maxDelaySec', l: 'Delay max (s)', min: MIN_DELAY }, { k: 'minScore', l: 'Ngưỡng điểm bài', min: 0 },
+  { k: 'postsPerScan', l: 'Số bài/nhóm mỗi lần tìm', min: 1 },
 ]
 const KINDS = [
   { k: 'social', t: 'Comment dạo', d: 'Comment tự nhiên, không link' },
@@ -67,7 +68,13 @@ export default function Queue() {
 
   const setKind = (k) => { if (k === 'social') setCfg({ mode: 'social' }); else setCfg({ mode: 'affiliate', productSource: k === 'shopee' ? 'shopee' : 'catalog' }) }
   const setNum = (k) => (e) => setLocal({ ...cfgL, [k]: +e.target.value })
-  const saveAdv = () => setCfg({ dailyCap: cfgL.dailyCap, minDelaySec: cfgL.minDelaySec, maxDelaySec: cfgL.maxDelaySec, minScore: cfgL.minScore, postsPerScan: cfgL.postsPerScan, requireApproval: cfgL.requireApproval, subId: cfgL.subId, shopeeLimit: cfgL.shopeeLimit })
+  const saveAdv = () => {
+    const minD = Math.max(MIN_DELAY, cfgL.minDelaySec || MIN_DELAY)   // ép sàn 90s
+    const maxD = Math.max(minD, cfgL.maxDelaySec || minD)
+    setLocal({ ...cfgL, minDelaySec: minD, maxDelaySec: maxD })
+    setCfg({ dailyCap: cfgL.dailyCap, minDelaySec: minD, maxDelaySec: maxD, minScore: cfgL.minScore, postsPerScan: cfgL.postsPerScan, requireApproval: cfgL.requireApproval, subId: cfgL.subId, shopeeLimit: cfgL.shopeeLimit })
+    if ((cfgL.minDelaySec || 0) < MIN_DELAY) notify('blue', `Delay tối thiểu 90s (an toàn) — đã đặt về ${minD}s`)
+  }
   const act = (type, postId, extra, timeout) => call({ type, postId, ...(extra || {}) }, { timeout })
 
   const targets = cfg.groupIds || []
@@ -117,7 +124,7 @@ export default function Queue() {
       setSel(prev => { const n = new Set(prev); n.delete(ids[i]); return n })
       setPstat(p => ({ ...p, done: i + 1 })); refresh()
       if (i < ids.length - 1 && !stopRef.current) {
-        const lo = Math.max(5, Math.min(cfg.minDelaySec, cfg.maxDelaySec)), hi = Math.max(lo, Math.max(cfg.minDelaySec, cfg.maxDelaySec))
+        const lo = Math.max(MIN_DELAY, Math.min(cfg.minDelaySec, cfg.maxDelaySec)), hi = Math.max(lo, Math.max(cfg.minDelaySec, cfg.maxDelaySec))
         let secs = lo + Math.floor(Math.random() * (hi - lo + 1))
         for (; secs > 0 && !stopRef.current; secs--) { setPstat(p => ({ ...p, wait: secs })); await sleep(1000) }
       }
@@ -210,7 +217,7 @@ export default function Queue() {
         {panel === 'adv' && (
           <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/40 p-3">
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
-              {NUM.map(f => <Field key={f.k} label={f.l}><Input type="number" value={cfgL[f.k]} onChange={setNum(f.k)} /></Field>)}
+              {NUM.map(f => <Field key={f.k} label={f.l}><Input type="number" min={f.min} value={cfgL[f.k]} onChange={setNum(f.k)} /></Field>)}
               {kind === 'shopee' && <Field label="Số SP/lần tìm"><Input type="number" value={cfgL.shopeeLimit ?? 10} onChange={e => setLocal({ ...cfgL, shopeeLimit: +e.target.value })} /></Field>}
               {kind === 'shopee' && <Field label="sub_id"><Input value={cfgL.subId || ''} onChange={e => setLocal({ ...cfgL, subId: e.target.value })} placeholder="vd: fbauto-sub2" /></Field>}
             </div>

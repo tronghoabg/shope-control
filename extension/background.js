@@ -95,8 +95,9 @@ function todayKey() {
   const d = new Date();
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
+const MIN_DELAY_SEC = 90;   // an toàn checkpoint: không cho nhanh hơn 90s giữa 2 lần đăng
 function rndDelaySec(cfg) {
-  const lo = Math.max(20, cfg.minDelaySec | 0);
+  const lo = Math.max(MIN_DELAY_SEC, cfg.minDelaySec | 0);
   const hi = Math.max(lo + 5, cfg.maxDelaySec | 0);
   return Math.floor(lo + Math.random() * (hi - lo));
 }
