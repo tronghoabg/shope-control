@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import {
   IconLayoutDashboard, IconUsersGroup, IconListCheck, IconShoppingCart,
-  IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink, IconUserCircle, IconCrown,
+  IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink, IconUserCircle, IconCrown, IconSend, IconBookmark, IconHelp,
 } from '@tabler/icons-react'
 
-const PLAN_NAME = { free: 'Miễn phí', m1: 'Pro 1 tháng', m6: 'Pro 6 tháng', m12: 'Pro 12 tháng' }
+const PLAN_NAME = { free: 'Miễn phí', basic: 'Cơ bản', pro: 'Chuyên', business: 'Đại lý' }
 
 function AccountBox({ account, onManage }) {
   const a = account
@@ -18,7 +18,7 @@ function AccountBox({ account, onManage }) {
     </div>
   )
   const pro = a.plan && a.plan !== 'free'
-  const usedTxt = a.remaining === -1 ? 'Không giới hạn' : `${a.usedToday ?? 0}/${a.dailyLimit ?? 10} hôm nay`
+  const usedTxt = a.remaining === -1 ? 'Không giới hạn' : `${a.usedToday ?? 0}/${a.dailyLimit ?? 5} hôm nay`
   const initial = (a.name || a.email || '?')[0].toUpperCase()
   return (
     <div className="mt-auto border-t border-slate-800 p-3">
@@ -44,34 +44,54 @@ import LogPanel from './LogPanel.jsx'
 import Overview from './pages/Overview.jsx'
 import Discover from './pages/Discover.jsx'
 import Groups from './pages/Groups.jsx'
+import PostGroups from './pages/PostGroups.jsx'
+import Saved from './pages/Saved.jsx'
 import Queue from './pages/Queue.jsx'
 import Posted from './pages/Posted.jsx'
 import Catalog from './pages/Catalog.jsx'
 import LinkTool from './pages/LinkTool.jsx'
 import Logs from './pages/Logs.jsx'
 import Settings from './pages/Settings.jsx'
+import Guide from './pages/Guide.jsx'
 
 const NAV = [
   { key: 'overview', label: 'Tổng quan', icon: IconLayoutDashboard, render: (goto) => <Overview goto={goto} /> },
-  { key: 'discover', label: 'Khám phá nhóm', icon: IconCompass, render: () => <Discover /> },
+  { key: 'discover', label: 'Tham gia nhóm', icon: IconCompass, render: () => <Discover /> },
   { key: 'groups', label: 'Nhóm của tôi', icon: IconUsersGroup, render: () => <Groups /> },
-  { key: 'queue', label: 'Hàng chờ duyệt', icon: IconListCheck, render: () => <Queue /> },
+  { key: 'postgroups', label: 'Đăng bài nhóm', icon: IconSend, render: () => <PostGroups /> },
+  { key: 'saved', label: 'Đã lưu', icon: IconBookmark, render: () => <Saved /> },
+  { key: 'queue', label: 'Comment dạo', icon: IconListCheck, render: () => <Queue /> },
   { key: 'posted', label: 'Đã đăng', icon: IconChecks, render: () => <Posted /> },
   { key: 'catalog', label: 'Catalog', icon: IconShoppingCart, render: () => <Catalog /> },
   { key: 'linktool', label: 'Tạo link (test)', icon: IconLink, render: () => <LinkTool /> },
   { key: 'logs', label: 'Nhật ký', icon: IconHistory, render: () => <Logs /> },
-  { key: 'settings', label: 'Cài đặt API', icon: IconSettings, render: () => <Settings /> },
+  { key: 'guide', label: 'Hướng dẫn', icon: IconHelp, render: (goto) => <Guide goto={goto} /> },
+  { key: 'settings', label: 'Cài đặt', icon: IconSettings, render: () => <Settings /> },
 ]
 
+// Chip trạng thái kết nối ở header (xanh = ok, đỏ = chưa). Có onClick thì bấm được.
+function StatusChip({ ok, icon: Icon, label, title, onClick }) {
+  const cls = ok ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+  return (
+    <button type="button" onClick={onClick || undefined} title={title} disabled={!onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 ${cls} ${onClick ? 'cursor-pointer hover:brightness-125' : 'cursor-default'}`}>
+      <Icon size={14} />
+      <span className="hidden sm:inline">{label}</span>
+      <span className={`h-1.5 w-1.5 rounded-full ${ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
+    </button>
+  )
+}
+
 export default function App() {
-  const { s, connected, hasKey, connectFb, account } = useShope()
+  const { s, connected, aiReady, connectFb, account } = useShope()
   const [page, setPage] = useState('overview')
   const [showLogs, setShowLogs] = useState(true)
   const conn = s?.conn
+  const shopee = s?.shopee
   const queueCount = s?.queue?.length ?? 0
   const logCount = s?.logs?.length ?? 0
 
-  useEffect(() => { if (connected && s && !hasKey) setPage('settings') }, [connected, s, hasKey])
+  useEffect(() => { if (connected && s && !aiReady) setPage('settings') }, [connected, s, aiReady])
 
   // Chưa kết nối được extension → màn hình hướng dẫn rõ ràng (thay vì các trang treo "Đang tải…")
   if (!connected || !s) {
@@ -95,13 +115,13 @@ export default function App() {
           <LogoMark size={36} />
           <div>
             <div className="font-bold leading-tight text-slate-100">ToolMKT AI</div>
-            <div className="text-[11px] text-slate-500">Rải link Shopee bằng AI</div>
+            <div className="text-[11px] text-slate-500">Tìm khách &amp; bán hàng Facebook bằng AI</div>
           </div>
         </div>
 
         <nav className="mt-2 flex flex-col gap-1 px-2">
           {NAV.map(item => {
-            const locked = !hasKey && item.key !== 'settings'
+            const locked = !aiReady && item.key !== 'settings'
             const active = page === item.key
             return (
               <button key={item.key} disabled={locked} onClick={() => setPage(item.key)}
@@ -112,7 +132,7 @@ export default function App() {
                 {item.key === 'queue' && queueCount > 0 && (
                   <span className="grid h-5 min-w-5 place-items-center rounded-full bg-orange-500 px-1 text-[11px] font-bold text-white">{queueCount}</span>
                 )}
-                {item.key === 'settings' && !hasKey && <span className="rounded bg-red-500/20 px-1.5 text-[10px] font-semibold text-red-400">cần</span>}
+                {item.key === 'settings' && !aiReady && <span className="rounded bg-red-500/20 px-1.5 text-[10px] font-semibold text-red-400">cần</span>}
                 {locked && <IconLock size={13} className="opacity-50" />}
               </button>
             )
@@ -120,16 +140,24 @@ export default function App() {
         </nav>
 
         <AccountBox account={account} onManage={() => setPage('settings')} />
+        <a href="https://zalo.me/g/fsjwncgaupa915h891zx" target="_blank" rel="noreferrer"
+          className="flex items-center justify-center gap-2 border-t border-slate-800 bg-slate-900 px-3 py-2.5 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/10">
+          💬 Nhóm hỗ trợ Zalo
+        </a>
       </aside>
 
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 items-center justify-between border-b border-slate-800 bg-slate-900/50 px-5">
-          <div className="flex items-center gap-2 text-sm">
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 ${connected ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'}`}>
-              {connected ? <IconPlugConnected size={14} /> : <IconPlugConnectedX size={14} />}
-              {connected ? 'Extension' : 'Chưa có extension'}
-            </span>
+          <div className="flex items-center gap-1.5 text-sm">
+            <StatusChip ok={connected} icon={connected ? IconPlugConnected : IconPlugConnectedX} label="Extension"
+              title={connected ? 'Extension đã kết nối' : 'Chưa kết nối extension — Reload extension + F5'} />
+            <StatusChip ok={!!conn?.connected} icon={IconBrandFacebook} label="Facebook"
+              title={conn?.connected ? `Facebook: ${conn.name || conn.id}` : 'Chưa kết nối Facebook — bấm để kết nối'}
+              onClick={conn?.connected ? null : () => connectFb(false)} />
+            <StatusChip ok={!!shopee?.loggedIn} icon={IconShoppingCart} label="Shopee"
+              title={shopee?.loggedIn ? 'Shopee đã đăng nhập' : shopee?.hasTab ? 'Có tab Shopee nhưng chưa đăng nhập — bấm để mở' : 'Chưa mở Shopee — bấm để mở & đăng nhập'}
+              onClick={shopee?.loggedIn ? null : () => window.open('https://shopee.vn', '_blank')} />
           </div>
           <div className="flex items-center gap-3">
             {conn?.connected ? (

@@ -25,7 +25,11 @@
   "host_permissions": [
     "https://www.facebook.com/*",
     "https://web.facebook.com/*",
+    "https://facebook.com/*",
+    "https://m.facebook.com/*",
+    "https://mbasic.facebook.com/*",
     "https://graph.facebook.com/*",
+    "https://upload.facebook.com/*",
     "https://shopee.vn/*",
     "https://s.shopee.vn/*",
     "https://affiliate.shopee.vn/*",

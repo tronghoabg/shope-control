@@ -482,4 +482,97 @@ async function fbJoinGroup(runFetch, creds, group) {
   return { ok: !!json?.data && !json?.errors, raw: json?.data || null, errors: json?.errors || null };
 }
 
-self.ShopeFbApi = { fbFetchJoinedGroups, fbFetchGroupFeed, fbPostComment, fbSearchGroups, fbJoinGroup, FB_GRAPHQL_URL, _gql: gql };
+// ─────────────────────────────────────────────────────────────────────────────
+// 6) ĐĂNG BÀI VÀO NHÓM  ✅ doc_id thật (ComposerStoryCreateMutation) — port từ adsmeta
+// ─────────────────────────────────────────────────────────────────────────────
+const POST_MUTATION = { FRIENDLY_NAME: 'ComposerStoryCreateMutation', DOC_ID: '27450471367978057' };
+const POST_RELAY = {
+  __relay_internal__pv__CometUFIShareActionMigrationrelayprovider: true,
+  __relay_internal__pv__GHLShouldChangeSponsoredDataFieldNamerelayprovider: true,
+  __relay_internal__pv__GHLShouldChangeAdIdFieldNamerelayprovider: true,
+  __relay_internal__pv__CometUFI_dedicated_comment_routable_dialog_gkrelayprovider: true,
+  __relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider: 'AUTO_TRANSLATE',
+  __relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider: false,
+  __relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider: false,
+  __relay_internal__pv__IsWorkUserrelayprovider: false,
+  __relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider: false,
+  __relay_internal__pv__CometUFISingleLineUFIrelayprovider: false,
+  __relay_internal__pv__CometFeedStory_enable_reactor_facepilerelayprovider: false,
+  __relay_internal__pv__CometFeedStory_enable_social_bubblesrelayprovider: false,
+  __relay_internal__pv__CometFeedStory_enable_post_permalink_white_space_clickrelayprovider: false,
+  __relay_internal__pv__TestPilotShouldIncludeDemoAdUseCaserelayprovider: false,
+  __relay_internal__pv__FBReels_deprecate_short_form_video_context_gkrelayprovider: true,
+  __relay_internal__pv__FBReels_enable_view_dubbed_audio_type_gkrelayprovider: true,
+  __relay_internal__pv__CometFeedShareMedia_shouldPrefetchShareImagerelayprovider: false,
+  __relay_internal__pv__CometImmersivePhotoCanUserDisable3DMotionrelayprovider: false,
+  __relay_internal__pv__WorkCometIsEmployeeGKProviderrelayprovider: false,
+  __relay_internal__pv__IsMergQAPollsrelayprovider: false,
+  __relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_gkrelayprovider: true,
+  __relay_internal__pv__relay_provider_comet_ufi_ssr_seo_deferrelayprovider: true,
+  __relay_internal__pv__ReelsIFUCard_reelsIFULikeCountrelayprovider: true,
+  __relay_internal__pv__FBReelsIFUTileContent_reelsIFUPlayOnHoverrelayprovider: true,
+  __relay_internal__pv__GroupsCometGYSJFeedItemHeightrelayprovider: 206,
+  __relay_internal__pv__ShouldEnableBakedInTextStoriesrelayprovider: false,
+  __relay_internal__pv__StoriesShouldIncludeFbNotesrelayprovider: false,
+  __relay_internal__pv__groups_comet_use_glvrelayprovider: true,
+  __relay_internal__pv__GHLShouldChangeSponsoredAuctionDistanceFieldNamerelayprovider: false,
+  __relay_internal__pv__GHLShouldUseSponsoredAuctionLabelFieldNameV1relayprovider: false,
+  __relay_internal__pv__GHLShouldUseSponsoredAuctionLabelFieldNameV2relayprovider: false,
+};
+function buildComposedText(text) {
+  const blocks = String(text).split('\n');
+  return {
+    block_data: blocks.map(() => '{}'), block_depths: blocks.map(() => 0), block_types: blocks.map(() => 0),
+    blocks, entities: blocks.map(() => '[]'), entity_map: '{}', inline_styles: blocks.map(() => '[]'),
+  };
+}
+
+// Đăng 1 bài (text + link tuỳ chọn) vào 1 nhóm. → { ok, postUrl, errors }
+async function fbCreateGroupPost(runFetch, creds, groupId, message, opts = {}) {
+  const text = opts.link ? `${message}\n${opts.link}` : message;
+  const variables = {
+    input: {
+      composer_entry_point: 'inline_composer', composer_source_surface: 'group', composer_type: 'group',
+      logging: { composer_session_id: uuid() }, source: 'WWW',
+      message: { ranges: [], text }, with_tags_ids: null, inline_activities: [],
+      text_format_preset_id: opts.bgPresetId || '0', group_flair: { flair_id: null },
+      attachments: (opts.photoIds || []).map(id => ({ photo: { id } })),
+      composed_text: buildComposedText(text), navigation_data: null, tracking: [null],
+      event_share_metadata: { surface: 'newsfeed' }, audience: { to_id: String(groupId) },
+      actor_id: creds.uid, client_mutation_id: rndId(),
+    },
+    feedLocation: 'GROUP', feedbackSource: 0, focusCommentID: null, gridMediaWidth: null,
+    groupID: null, scale: 1, privacySelectorRenderLocation: 'COMET_STREAM',
+    checkPhotosToReelsUpsellEligibility: false, referringStoryRenderLocation: null,
+    renderLocation: 'group', useDefaultActor: false, inviteShortLinkKey: null,
+    isFeed: false, isFundraiser: false, isFunFactPost: false, isGroup: true, isEvent: false,
+    isTimeline: false, isSocialLearning: false, isPageNewsFeed: false, isProfileReviews: false,
+    isWorkSharedDraft: false, ...POST_RELAY,
+  };
+  const json = await gql(runFetch, creds, POST_MUTATION.FRIENDLY_NAME, POST_MUTATION.DOC_ID, variables);
+  const story = json?.data?.story_create?.story;
+  const postId = story?.legacy_story_hideable_id ?? json?.data?.story_create?.group_feed_story_edge?.node?.post_id;
+  const postUrl = story?.url ?? (postId ? `https://www.facebook.com/groups/${groupId}/permalink/${postId}/` : '');
+  return { ok: !!postUrl, postUrl, errors: json?.errors || null };
+}
+
+// Upload 1 ảnh (dataURL) lên upload.facebook.com → trả về photoID.
+// runUpload(url, fields, { base64, name, mime }) -> text (chạy trong tab FB, dựng FormData + 'farr').
+async function fbUploadPhoto(runUpload, creds, dataUrl, name = 'photo.jpg') {
+  const m = /^data:(.+?);base64,(.*)$/s.exec(String(dataUrl));
+  if (!m) throw new Error('Ảnh không hợp lệ');
+  const mime = m[1], base64 = m[2];
+  const qs = new URLSearchParams({
+    av: creds.uid, __user: creds.uid, __a: '1', __req: (_req++).toString(36), dpr: '1',
+    fb_dtsg: creds.dtsg, jazoest: computeJazoest(creds.dtsg), lsd: creds.lsd || '', __comet_req: '15',
+  }).toString();
+  const url = `https://upload.facebook.com/ajax/react_composer/attachments/photo/upload?${qs}`;
+  const fields = { source: '8', profile_id: creds.uid, waterfallxapp: 'comet', upload_id: 'jsc_' + Math.floor(Math.random() * 1e9).toString(36) };
+  const raw = await runUpload(url, fields, { base64, name, mime });
+  let json; try { json = JSON.parse(String(raw).replace(/^for\s*\(\s*;\s*;\s*\)\s*;?/, '')); } catch { json = {}; }
+  const photoID = json?.payload?.photoID || json?.payload?.photo_id;
+  if (!photoID) throw new Error('Upload ảnh thất bại: ' + (json?.errorSummary || json?.error?.message || 'không nhận được ảnh từ Facebook'));
+  return String(photoID);
+}
+
+self.ShopeFbApi = { fbFetchJoinedGroups, fbFetchGroupFeed, fbPostComment, fbSearchGroups, fbJoinGroup, fbCreateGroupPost, fbUploadPhoto, FB_GRAPHQL_URL, _gql: gql };

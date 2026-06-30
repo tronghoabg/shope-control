@@ -1,6 +1,10 @@
 import { prisma } from './prisma'
 import { PLANS, PlanId } from './plans'
 
+function validPlan(p: string | undefined): PlanId {
+  return p && (PLANS as Record<string, unknown>)[p] ? (p as PlanId) : 'free' // gói lạ/cũ → coi như free (tránh crash)
+}
+
 // Ngày theo giờ VN (UTC+7) dạng YYYY-MM-DD — để reset quota lúc nửa đêm VN.
 export function vnDateKey(d = new Date()): string {
   const vn = new Date(d.getTime() + 7 * 3600 * 1000)
@@ -12,7 +16,7 @@ export async function getActivePlan(userId: string): Promise<PlanId> {
   const sub = await prisma.subscription.findUnique({ where: { userId } })
   if (!sub || sub.plan === 'free') return 'free'
   if (sub.expiresAt && sub.expiresAt.getTime() < Date.now()) return 'free'
-  return sub.plan as PlanId
+  return validPlan(sub.plan)
 }
 
 export interface Quota {
@@ -26,7 +30,7 @@ export interface Quota {
 
 export async function getQuota(userId: string): Promise<Quota> {
   const plan = await getActivePlan(userId)
-  const limit = PLANS[plan].dailyComments
+  const limit = PLANS[plan].dailyActions
   const date = vnDateKey()
   const usage = await prisma.dailyUsage.findUnique({ where: { userId_date: { userId, date } } })
   const used = usage?.comments ?? 0
@@ -44,13 +48,13 @@ export async function getQuota(userId: string): Promise<Quota> {
 // Ghi nhận 1 comment đã đăng. Trả về quota mới. Ném lỗi nếu vượt giới hạn free.
 export async function recordComment(userId: string): Promise<Quota> {
   const plan = await getActivePlan(userId)
-  const limit = PLANS[plan].dailyComments
+  const limit = PLANS[plan].dailyActions
   const date = vnDateKey()
 
   if (limit !== Infinity) {
     const cur = await prisma.dailyUsage.findUnique({ where: { userId_date: { userId, date } } })
     if ((cur?.comments ?? 0) >= limit) {
-      const e = new Error(`Đã đạt giới hạn ${limit} comment/ngày của gói miễn phí. Nâng cấp Pro để dùng không giới hạn.`)
+      const e = new Error(`Đã đạt giới hạn ${limit} comment/bài mỗi ngày của gói ${PLANS[plan].name}. Nâng cấp gói cao hơn để tăng hạn mức.`)
       ;(e as any).code = 'QUOTA_EXCEEDED'
       throw e
     }

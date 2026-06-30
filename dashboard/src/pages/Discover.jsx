@@ -21,7 +21,7 @@ function fmtMembers(n) {
 }
 
 export default function Discover() {
-  const { s, hasKey, call, notify, refresh } = useShope()
+  const { s, aiReady, call, notify, refresh } = useShope()
   const [keyword, setKeyword] = useState('')
   const [suggested, setSuggested] = useState([])
   const [suggesting, setSuggesting] = useState(false)
@@ -92,7 +92,7 @@ export default function Discover() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-xl font-bold text-slate-100">Khám phá nhóm mới</h1>
+      <h1 className="text-xl font-bold text-slate-100">Tham gia nhóm</h1>
 
       <Hint id="discover">
         Tìm nhóm đúng niche để rải link. <b>1)</b> Bấm <b>AI gợi ý từ khoá</b> (hoặc gõ từ khoá) → <b>Tìm</b>.
@@ -100,7 +100,7 @@ export default function Discover() {
         {' '}<b>3)</b> Nhóm đã tham gia bấm <b>+ Mục tiêu</b> để tool rải link/comment vào đó.
       </Hint>
 
-      {!hasKey && (
+      {!aiReady && (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-300">
           Cần nhập API key (trang Cài đặt) để AI gợi ý &amp; chấm điểm nhóm.
         </div>
@@ -113,11 +113,13 @@ export default function Discover() {
       )}
 
       <Section title="Tìm nhóm theo niche"
-        right={<Btn variant="default" icon={IconSparkles} loading={suggesting} disabled={!hasKey} onClick={suggest}>AI gợi ý từ khoá</Btn>}>
+        right={<Btn variant="default" icon={IconSparkles} loading={suggesting} disabled={!aiReady} onClick={suggest}>AI gợi ý từ khoá</Btn>}>
         <div className="flex gap-2">
           <Input placeholder="từ khoá, cách nhau dấu phẩy (vd: thú cưng, cá cảnh)" value={keyword}
             onChange={(e) => setKeyword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search()} />
-          <Btn variant="primary" icon={IconSearch} loading={searching} onClick={() => search()}>Tìm</Btn>
+          {searching
+            ? <Btn variant="danger" icon={IconPlayerStop} className="shrink-0" onClick={() => { ext({ type: 'CANCEL_RUN' }); notify('blue', 'Đang dừng…') }}>Dừng</Btn>
+            : <Btn variant="primary" icon={IconSearch} className="shrink-0" onClick={() => search()}>Tìm</Btn>}
         </div>
         {suggested.length > 0 && (
           <div className="mt-3">
@@ -144,8 +146,13 @@ export default function Discover() {
         <Card className="flex flex-wrap items-center gap-3 p-3">
           <Badge color="green">{selCount} đã chọn</Badge>
           <Btn size="sm" icon={IconStarFilled} onClick={selectGood} disabled={!!bulk}>Chọn nhóm tốt (≥70đ)</Btn>
-          <Btn size="sm" variant="ghost" onClick={selectAll} disabled={!!bulk}>Chọn tất cả</Btn>
-          <Btn size="sm" variant="ghost" onClick={clearSel} disabled={!!bulk}>Bỏ chọn</Btn>
+          <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300">
+            <input type="checkbox" disabled={!!bulk || !joinable.length}
+              checked={joinable.length > 0 && joinable.every(g => selected.has(g.groupId))}
+              onChange={() => (joinable.length && joinable.every(g => selected.has(g.groupId))) ? clearSel() : selectAll()}
+              className="h-4 w-4 accent-indigo-500" />
+            Chọn tất cả
+          </label>
           <div className="ml-auto flex items-center gap-2">
             <span className="text-xs text-slate-500">Giãn cách (giây)</span>
             <input type="number" min={20} value={delay} onChange={(e) => setDelay(+e.target.value)} disabled={!!bulk}

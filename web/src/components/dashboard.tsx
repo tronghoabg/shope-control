@@ -70,8 +70,8 @@ export function UpgradePanel({ currentPlan }: { currentPlan: PlanId }) {
         return (
           <div key={id} className={`rounded-xl border p-4 ${p.highlight ? 'border-orange-500/60 bg-orange-500/[0.06]' : 'border-slate-700 bg-slate-800/40'}`}>
             <div className="font-semibold text-slate-100">{p.name}</div>
-            <div className="mt-1 text-2xl font-bold text-slate-50">{fmtVnd(p.price)}</div>
-            <div className="text-xs text-slate-500">{p.days} ngày · không giới hạn</div>
+            <div className="mt-1 text-2xl font-bold text-slate-50">{fmtVnd(p.price)}<span className="text-xs font-normal text-slate-500">/tháng</span></div>
+            <div className="text-xs text-slate-500">{p.dailyActions} comment+bài/ngày · {p.desc}</div>
             <button onClick={() => buy(id)} disabled={!!loading}
               className={`mt-3 w-full rounded-lg px-3 py-2 text-sm font-semibold ${p.highlight ? 'bg-gradient-to-r from-orange-500 to-red-600 text-white' : 'bg-slate-700 text-slate-100 hover:bg-slate-600'} disabled:opacity-50`}>
               {loading === id ? 'Đang tạo…' : currentPlan === id ? 'Gia hạn' : 'Mua'}

@@ -24,6 +24,7 @@ const DEFAULTS = {
   tone: 'tự nhiên, thân thiện',
   requireApproval: true,      // true = chỉ đăng item đã được duyệt trong web app
   mode: 'affiliate',          // 'affiliate' = rải link Shopee · 'social' = comment dạo (không link, không cần catalog)
+  seedContent: '',            // Comment dạo: nội dung tìm khách có sẵn → AI đổi lại mỗi bài (rỗng = AI tự soạn theo bài)
   licenseToken: '',           // token tài khoản (lấy ở web Dashboard) — để đồng bộ hạn mức free/Pro
   webBase: 'http://localhost:3000', // địa chỉ web SaaS (LOCAL test; production: https://toolmktai.com)
   productSource: 'catalog',   // (chế độ affiliate) 'catalog' = CSV tự nạp · 'shopee' = AI tự nghĩ SP + search Shopee + dựng link
@@ -32,9 +33,14 @@ const DEFAULTS = {
   shopeeLimit: 10,            // số SP lấy về mỗi lần search Shopee
 };
 
+// Lỗi AI "cứng" → dừng cả mẻ quét/đăng + báo rõ (thay vì lặp lỗi từng nhóm).
+const HARD_AI_ERRORS = new Set(['AI_CAP', 'NO_SYSTEM_KEY', 'BANNED', 'RATE_LIMIT', 'TOO_LARGE', 'UNAUTHORIZED']);
+
 async function getCfg() {
-  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license']);
+  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license', 'savedGroupLists', 'savedPosts']);
   return {
+    savedGroupLists: s.savedGroupLists || [],   // [{ id, name, groupIds:[], createdAt }]
+    savedPosts: s.savedPosts || [],             // [{ id, title, content, link, bgPresetId, createdAt }]
     progress: s.progress || { active: false, phase: '', label: '', current: 0, total: 0, updatedAt: 0 },
     cfg: { ...DEFAULTS, ...(s.cfg || {}) },
     state: { dateKey: '', doneToday: 0, nextActionAt: 0, groupIdx: 0, cursor: null, ...(s.state || {}) },
@@ -78,6 +84,11 @@ async function setProgress(p) {
 async function endProgress(label) {
   try { await chrome.storage.local.set({ progress: { active: false, phase: '', label: label || '', current: 0, total: 0, updatedAt: Date.now() } }); } catch {}
 }
+
+// ─── Cờ DỪNG cho thao tác THỦ CÔNG (quét/tìm nhóm) — khác kill-switch của Auto ──
+// Lưu ở session (reset khi SW khởi động lại). Vòng lặp dài check giữa mỗi bước → thoát sớm.
+async function clearCancel() { try { await chrome.storage.session.set({ cancelRun: false }); } catch {} }
+async function isCancelled() { try { return !!(await chrome.storage.session.get('cancelRun')).cancelRun; } catch { return false; } }
 
 function todayKey() {
   // Theo giờ máy local
@@ -138,7 +149,11 @@ function hasApiKey(cfg) {
   return !!((cfg.apiKeys || {})[cfg.provider || 'anthropic'] || '').trim();
 }
 function requireApiKey(cfg) {
-  if (!hasApiKey(cfg)) throw new Error('Chưa có API key AI — vào trang "Cài đặt API" nhập key (tool cần AI để đọc & đánh giá nhóm/bài).');
+  const managed = !!(cfg.webBase && cfg.licenseToken);   // đã đăng nhập → dùng AI hệ thống
+  if (!hasApiKey(cfg) && !managed) {
+    const e = new Error('Chưa kích hoạt AI — hãy ĐĂNG NHẬP tài khoản trên web (để dùng AI hệ thống theo gói), hoặc nhập API key riêng.');
+    e.code = 'NO_AI'; throw e;
+  }
 }
 
 // ─── Lấy creds FB: ưu tiên session (tab FB đang mở), fallback local (đã lưu) ──
@@ -158,6 +173,30 @@ async function getConn() {
   const creds = await getCreds();
   const u = (await chrome.storage.local.get('fb_user')).fb_user || {};
   return { connected: !!(creds.dtsg || creds.token), hasToken: !!creds.token, name: u.name || null, id: u.id || null, picture: u.picture || null };
+}
+
+// Trạng thái Shopee: có tab shopee.vn đang mở & đã đăng nhập (đọc cookie SPC_U/SPC_EC).
+// Cache ngắn 12s vì GET_STATE gọi mỗi 4s.
+let _shopeeConnCache = { at: 0, val: { hasTab: false, loggedIn: false } };
+async function getShopeeConn() {
+  if (Date.now() - _shopeeConnCache.at < 12000) return _shopeeConnCache.val;
+  const val = { hasTab: false, loggedIn: false };
+  try {
+    const tabs = await chrome.tabs.query({ url: ['https://shopee.vn/*', 'https://*.shopee.vn/*'] });
+    const tab = (tabs || []).find(t => t.id != null);
+    if (tab) {
+      val.hasTab = true;
+      try {
+        const inj = await chrome.scripting.executeScript({
+          target: { tabId: tab.id }, world: 'ISOLATED',
+          func: () => { const c = document.cookie || ''; const m = c.match(/SPC_U=([^;]+)/); return (!!(m && m[1] && m[1] !== '-') || /SPC_EC=/.test(c)); },
+        });
+        val.loggedIn = !!inj?.[0]?.result;
+      } catch {}
+    }
+  } catch {}
+  _shopeeConnCache = { at: Date.now(), val };
+  return val;
 }
 
 // Giải mã chuỗi unicode-escaped trong HTML (vd á → á)
@@ -194,6 +233,17 @@ async function fetchFbTokenFromSW() {
     } catch (e) { /* thử URL kế tiếp */ }
   }
   return { token: null, dtsg: null, name: null, id: null };
+}
+
+// Đảm bảo có creds (dtsg/uid). Thiếu → SW TỰ fetch facebook.com bằng cookie user (không cần tab mở).
+// Vẫn thiếu sau khi thử → user thật sự chưa đăng nhập facebook.com trong trình duyệt này.
+async function ensureCreds() {
+  let creds = await getCreds();
+  if (!creds.dtsg || !creds.uid) {
+    await fetchFbTokenFromSW();
+    creds = await getCreds();
+  }
+  return creds;
 }
 
 // Gọi Graph /me lấy tên + avatar chuẩn.
@@ -259,17 +309,35 @@ async function waitTabComplete(tabId, timeoutMs = 15000) {
   return true;
 }
 
-// Tìm tab facebook.com đang mở, hoặc tự tạo tab NỀN + GHIM nếu chưa có (đăng nhập sẵn qua cookie).
+// Tab có script được không? Chỉ www./web.facebook.com nằm trong host_permissions.
+// (m./mbasic./facebook.com không-www, about:blank, chrome:// … đều KHÔNG script được → "cannot access".)
+function isScriptableFbUrl(url) {
+  return /^https:\/\/(www|web)\.facebook\.com\//.test(url || '');
+}
+
+// Tìm tab facebook.com đang mở, hoặc tự tạo tab NỀN nếu chưa có (đăng nhập sẵn qua cookie).
 async function getFbTab() {
   const existing = await chrome.tabs.query({ url: ['https://www.facebook.com/*', 'https://web.facebook.com/*'] });
   const cur = (existing || []).find(t => t.id != null);
   if (cur) return cur.id;
   const saved = (await chrome.storage.session.get('fbTabId')).fbTabId;
   if (saved != null) {
-    try { const t = await chrome.tabs.get(saved); if (t && t.id != null) return t.id; } catch {}
+    try {
+      const t = await chrome.tabs.get(saved);
+      if (t && t.id != null) {
+        // Tab đã lưu nhưng lạc sang host khác (redirect m./mbasic./apex, hay user bấm đi nơi khác)
+        // → điều hướng về www để executeScript khỏi bị "cannot access".
+        if (!isScriptableFbUrl(t.url)) {
+          await chrome.tabs.update(t.id, { url: 'https://www.facebook.com/' });
+          await waitTabComplete(t.id);
+          await new Promise(r => setTimeout(r, 1500));
+        }
+        return t.id;
+      }
+    } catch {}
     await chrome.storage.session.remove('fbTabId');   // id cũ đã chết → xoá
   }
-  const created = await chrome.tabs.create({ url: 'https://www.facebook.com/', active: false, pinned: true });
+  const created = await chrome.tabs.create({ url: 'https://www.facebook.com/', active: false });
   await chrome.storage.session.set({ fbTabId: created.id });
   await waitTabComplete(created.id);
   await new Promise(r => setTimeout(r, 1500));   // thêm chút cho content script inject + bơm creds
@@ -314,36 +382,85 @@ async function runFetchInFbTab(url, method, body, headers) {
         await new Promise(r => setTimeout(r, 500));
         continue;
       }
+      // Lần 2 vẫn "cannot access" → quyền host Facebook không có hiệu lực, hoặc không có tab FB script được.
+      if (/cannot access|cannot be scripted|Extension manifest must request permission/i.test(msg)) {
+        throw new Error('Không truy cập được tab Facebook. Hãy mở 1 tab facebook.com đã đăng nhập (www.facebook.com), rồi quét lại.');
+      }
       throw e;
     }
   }
   throw new Error('tab_fetch_failed');
 }
 
+// URL có phải shopee.vn script được không?
+function isShopeeUrl(url) {
+  return /^https:\/\/shopee\.vn\//.test(url || '');
+}
+
+// Tìm tab shopee.vn đang mở (ưu tiên tab user) → tab nền đã lưu (còn ở shopee.vn) →
+// tự tạo tab NỀN nếu chưa có. Cookie phiên áp theo domain nên tab nền vẫn "đăng nhập".
+async function getShopeeTab() {
+  const open = await chrome.tabs.query({ url: ['https://shopee.vn/*'] });
+  const cur = (open || []).find(t => t.id != null);
+  if (cur) return cur.id;
+  const saved = (await chrome.storage.session.get('shopeeTabId')).shopeeTabId;
+  if (saved != null) {
+    try {
+      const t = await chrome.tabs.get(saved);
+      if (t && t.id != null) {
+        if (!isShopeeUrl(t.url)) {   // tab nền lạc khỏi shopee → kéo về để script được
+          await chrome.tabs.update(t.id, { url: 'https://shopee.vn/' });
+          await waitTabComplete(t.id);
+          await new Promise(r => setTimeout(r, 1200));
+        }
+        return t.id;
+      }
+    } catch {}
+    await chrome.storage.session.remove('shopeeTabId');   // id cũ đã chết → xoá
+  }
+  const created = await chrome.tabs.create({ url: 'https://shopee.vn/', active: false });
+  try { await chrome.tabs.update(created.id, { autoDiscardable: false }); } catch {}   // chống Chrome 'discard'
+  await chrome.storage.session.set({ shopeeTabId: created.id });
+  await waitTabComplete(created.id);
+  await new Promise(r => setTimeout(r, 1500));
+  return created.id;
+}
+
 // ─── Chạy fetch TRONG tab shopee.vn thật (đăng nhập) → search_items không bị chặn bot ──
+// Không có tab → tự mở tab nền (giống Facebook), khỏi bắt user tự mở.
 async function runFetchInShopeeTab(url, method, body, headers) {
-  const tabs = await chrome.tabs.query({ url: ['https://shopee.vn/*'] });
-  const tab = (tabs || []).find(t => t.id != null);
-  if (!tab) throw new Error('no_shopee_tab: hãy mở 1 tab shopee.vn đã đăng nhập (để extension search sản phẩm)');
-  try {
-    const res = await chrome.tabs.sendMessage(tab.id, { type: 'SHOPE_FETCH', url, method, body, headers });
-    if (res?.ok) return res.data;
-    if (res?.error) throw new Error(res.error);
-  } catch (e) {
-    const inj = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      world: 'ISOLATED',
-      args: [url, method, body || '', headers || {}],
-      func: async (u, m, b, h) => {
-        try {
-          const r = await fetch(u, { method: m, credentials: 'include', headers: h, body: m !== 'GET' ? b : undefined });
-          return { ok: true, data: await r.text() };
-        } catch (err) { return { ok: false, error: String(err?.message || err) }; }
-      },
-    });
-    const r = inj?.[0]?.result;
-    if (r?.ok) return r.data;
-    throw new Error(r?.error || 'shopee_tab_fetch_failed');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const tabId = await getShopeeTab();
+    try {
+      try {
+        const res = await chrome.tabs.sendMessage(tabId, { type: 'SHOPE_FETCH', url, method, body, headers });
+        if (res?.ok) return res.data;
+        if (res?.error) throw new Error(res.error);
+      } catch (e) { /* content script chưa sẵn → dùng executeScript */ }
+      const inj = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'ISOLATED',
+        args: [url, method, body || '', headers || {}],
+        func: async (u, m, b, h) => {
+          try {
+            const r = await fetch(u, { method: m, credentials: 'include', headers: h, body: m !== 'GET' ? b : undefined });
+            return { ok: true, data: await r.text() };
+          } catch (err) { return { ok: false, error: String(err?.message || err) }; }
+        },
+      });
+      const r = inj?.[0]?.result;
+      if (r?.ok) return r.data;
+      throw new Error(r?.error || 'shopee_tab_fetch_failed');
+    } catch (e) {
+      const msg = String(e?.message || e);
+      const tabDead = /No tab with id|No frame|Frame with ID|No window|cannot be scripted|cannot access|The tab was closed/i.test(msg);
+      if (attempt === 0 && tabDead) {
+        await chrome.storage.session.remove('shopeeTabId');
+        await new Promise(r => setTimeout(r, 500));
+        continue;
+      }
+      throw e;
+    }
   }
   throw new Error('shopee_tab_fetch_failed');
 }
@@ -356,7 +473,8 @@ async function getShopeeScrapeTab() {
   if (saved != null) {
     try { const t = await chrome.tabs.get(saved); if (t && t.id != null) return t.id; } catch {}
   }
-  const tab = await chrome.tabs.create({ url: 'https://shopee.vn/', active: false, pinned: true });
+  const tab = await chrome.tabs.create({ url: 'https://shopee.vn/', active: false });
+  try { await chrome.tabs.update(tab.id, { autoDiscardable: false }); } catch {}   // chống Chrome 'discard' tab nền
   await chrome.storage.session.set({ shopeeTabId: tab.id });
   return tab.id;
 }
@@ -366,17 +484,33 @@ async function searchShopeeDom(keyword, limit = 10) {
   if (!kw) return [];
   const tabId = await getShopeeScrapeTab();
   const url = `https://shopee.vn/search?keyword=${encodeURIComponent(kw)}`;
-  try { await chrome.tabs.update(tabId, { url, active: false }); }
-  catch { // tab bị đóng → tạo lại rồi thử lần nữa
+
+  // Nhớ tab/cửa sổ đang active để TRẢ focus lại sau khi scrape xong.
+  let prev = null;
+  try {
+    const w = await chrome.windows.getLastFocused();
+    const [act] = await chrome.tabs.query({ active: true, windowId: w.id });
+    if (act && act.id !== tabId) prev = { tabId: act.id, windowId: w.id };
+  } catch {}
+
+  // Điều hướng + FOCUS tab Shopee: tab ẩn bị 'đóng băng' nên Shopee không render kết quả.
+  // Phải hiện tab này 1 nhịp để nó render, rồi trả focus về tab cũ.
+  let winId = null;
+  try {
+    await chrome.tabs.update(tabId, { url, active: true });
+    winId = (await chrome.tabs.get(tabId)).windowId;
+    if (winId != null) await chrome.windows.update(winId, { focused: true });
+  } catch {
     await chrome.storage.session.remove('shopeeTabId');
     const t = await getShopeeScrapeTab();
-    await chrome.tabs.update(t, { url, active: false });
+    await chrome.tabs.update(t, { url, active: true });
   }
 
   const scrape = async (tId) => {
     const res = await chrome.scripting.executeScript({
       target: { tabId: tId }, world: 'MAIN',
       func: () => {
+        try { window.scrollTo(0, document.body.scrollHeight * 0.6); } catch {}   // cuộn kích lazy-load
         const out = [], seen = new Set();
         for (const a of document.querySelectorAll('a[href*="-i."]')) {
           const href = a.getAttribute('href') || '';
@@ -400,14 +534,20 @@ async function searchShopeeDom(keyword, limit = 10) {
     return res?.[0]?.result || [];
   };
 
-  // Chờ trang render danh sách SP (poll tối đa ~18s)
-  const deadline = Date.now() + 18000;
+  // Chờ trang render danh sách SP (poll tối đa ~15s)
+  const deadline = Date.now() + 15000;
   let items = [];
   while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, 1200));
     try { const arr = await scrape(tabId); if (arr.length) { items = arr; break; } }
     catch { /* trang chưa sẵn sàng / đang điều hướng */ }
   }
+
+  // Trả focus về tab/cửa sổ người dùng đang dùng (giảm "giật" màn hình).
+  if (prev) {
+    try { await chrome.tabs.update(prev.tabId, { active: true }); if (prev.windowId != null) await chrome.windows.update(prev.windowId, { focused: true }); } catch {}
+  }
+
   return items.slice(0, limit).map(it => ({
     ...it, sold: 0, rating: 0,
     productUrl: it.path && it.path.startsWith('/')
@@ -434,8 +574,8 @@ async function getAffiliateTab() {
   const open = await chrome.tabs.query({ url: ['https://affiliate.shopee.vn/*'] });
   const cur = (open || []).find(t => t.id != null);
   if (cur) return cur.id;
-  // Không có → tạo tab NỀN + GHIM (ít vướng mắt) tới trang custom_link rồi chờ load
-  const created = await chrome.tabs.create({ url: 'https://affiliate.shopee.vn/offer/custom_link', active: false, pinned: true });
+  // Không có → tạo tab NỀN tới trang custom_link rồi chờ load
+  const created = await chrome.tabs.create({ url: 'https://affiliate.shopee.vn/offer/custom_link', active: false });
   await chrome.storage.session.set({ affTabId: created.id });
   await new Promise(r => setTimeout(r, 5000));
   return created.id;
@@ -529,8 +669,8 @@ async function refillQueue(opts = {}) {
   requireApiKey(cfg);
   if (!cfg.groupIds.length) throw new Error('Chưa cấu hình nhóm mục tiêu (groupIds)');
   if (cfg.mode !== 'social' && cfg.productSource !== 'shopee' && !catalog.length) throw new Error('Catalog rỗng — nhập CSV sản phẩm (hoặc đổi nguồn sang "Shopee tự động", hoặc chuyển chế độ Comment dạo).');
-  const creds = await getCreds();
-  if (!creds.dtsg) throw new Error('Chưa có fb_dtsg — mở tab facebook.com & đăng nhập để extension lấy creds');
+  const creds = await ensureCreds();
+  if (!creds.dtsg) throw new Error('Chưa đăng nhập Facebook — hãy đăng nhập facebook.com trong trình duyệt này rồi thử lại.');
 
   const cursors = state.cursors || {};
   const groupId = cfg.groupIds[state.groupIdx % cfg.groupIds.length];
@@ -564,8 +704,11 @@ async function refillQueue(opts = {}) {
     // 2) sinh comment theo mode
     let item;
     if (cfg.mode === 'social') {
-      // Comment dạo: tự nhiên, không link, không cần catalog
-      const sc = await self.ShopeAI.socialComment(cfg, post.text, groupId, cfg.tone);
+      // Comment dạo: nếu có "nội dung tìm khách" → AI đổi lại mỗi bài (chống trùng); không thì AI tự soạn theo bài.
+      const seed = (cfg.seedContent || '').trim();
+      const sc = seed
+        ? await self.ShopeAI.varySeedComment(cfg, post.text, groupId, seed, cfg.tone)
+        : await self.ShopeAI.socialComment(cfg, post.text, groupId, cfg.tone);
       if (sc.skip || !sc.comment) continue;
       item = { comment: sc.comment, productName: null, link: null, score: cls.score || 0 };
     } else {
@@ -703,6 +846,94 @@ async function commitComment(item) {
   return { ok, error, doneToday: state.doneToday, nextInSec: delay };
 }
 
+// ─── Upload ảnh (multipart) TRONG tab FB: dựng FormData + Blob từ base64 ──────
+async function runUploadInFbTab(url, fields, file) {
+  const tabId = await getFbTab();
+  const inj = await chrome.scripting.executeScript({
+    target: { tabId }, world: 'ISOLATED',
+    args: [url, fields || {}, file],
+    func: async (u, f, fileObj) => {
+      try {
+        const bin = atob(fileObj.base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const blob = new Blob([bytes], { type: fileObj.mime || 'image/jpeg' });
+        const fd = new FormData();
+        for (const k in f) fd.append(k, f[k]);
+        fd.append('farr', blob, fileObj.name || 'photo.jpg');
+        const r = await fetch(u, { method: 'POST', credentials: 'include', body: fd });
+        return { ok: true, data: await r.text() };
+      } catch (err) { return { ok: false, error: String(err?.message || err) }; }
+    },
+  });
+  const r = inj?.[0]?.result;
+  if (r?.ok) return r.data;
+  throw new Error(r?.error || 'upload_failed');
+}
+
+// ─── AI viết lại nội dung (đa-provider) — chống trùng khi đăng nhiều nhóm ─────
+async function aiRewrite(text) {
+  const { cfg } = await getCfg();
+  const out = await self.ShopeAI.callAI(cfg, {
+    system: 'Bạn là trợ lý viết nội dung marketing tiếng Việt, tự nhiên, đúng trọng tâm.',
+    temperature: 1.0, maxTokens: 700,
+    messages: [{ role: 'user', content:
+`Viết lại đoạn nội dung marketing dưới đây thành MỘT phiên bản KHÁC bằng tiếng Việt:
+- Giữ nguyên ý chính, thông điệp; giữ nguyên số điện thoại, link, hashtag, emoji nếu có.
+- Thay đổi cách diễn đạt/câu chữ để KHÔNG trùng lặp khi đăng vào nhiều nhóm Facebook.
+- Tránh từ ngữ dễ bị Facebook coi là spam/vi phạm.
+- CHỈ trả về nội dung bài viết hoàn chỉnh, KHÔNG thêm lời giải thích, KHÔNG bọc trong dấu ngoặc.
+
+Nội dung gốc:
+${text}` }],
+  });
+  return String(out || '').trim();
+}
+
+// ─── Đăng 1 bài vào 1 nhóm (ComposerStoryCreate) ─────────────────────────────
+// opts: { link, bgPresetId, images:[dataURL] }
+async function postToGroup(groupId, message, link, opts = {}) {
+  const { cfg, discoveredGroups, searchResults } = await getCfg();
+  const gName = (discoveredGroups.find(g => g.groupId === groupId)?.name)
+    || (searchResults.find(g => g.groupId === groupId)?.name) || `Nhóm ${groupId}`;
+  const qc = await checkQuota(cfg);
+  if (!qc.ok) { await pushLog('error', `⛔ ${qc.msg}`); return { ok: false, error: qc.msg, quotaBlocked: true }; }
+  const creds = await getCreds();
+  if (!creds.dtsg || !creds.uid) return { ok: false, error: 'Chưa kết nối Facebook' };
+
+  // Ghé trang nhóm 1 nhịp (tự nhiên hoá) — bỏ qua lỗi
+  try { await runFetchInFbTab(`https://www.facebook.com/groups/${groupId}/`, 'GET'); } catch {}
+  await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+
+  // Upload ảnh (nếu có) → photoIds. Lỗi 1 ảnh = bỏ ảnh đó, vẫn đăng phần còn lại.
+  const photoIds = [];
+  const images = opts.images || [];
+  for (let i = 0; i < images.length; i++) {
+    try { photoIds.push(await self.ShopeFbApi.fbUploadPhoto(runUploadInFbTab, creds, images[i], `photo_${i + 1}.jpg`)); }
+    catch (e) { await pushLog('warn', `⚠ Ảnh ${i + 1} "${gName}" lỗi upload: ${e?.message || e}`); }
+  }
+  // Nền màu chỉ áp cho bài CHỮ thuần (FB bỏ nền nếu có ảnh/link)
+  const bgPresetId = (!photoIds.length && !link) ? (opts.bgPresetId || '') : '';
+
+  let res;
+  try { res = await self.ShopeFbApi.fbCreateGroupPost(runFetchInFbTab, creds, groupId, message, { link, photoIds, bgPresetId }); }
+  catch (e) { await pushLog('error', `✗ Đăng bài "${gName}" lỗi: ${e?.message || e}`); return { ok: false, error: String(e?.message || e) }; }
+
+  if (res.ok) {
+    await pushLog('success', `✓ Đã đăng bài vào ${gName}${photoIds.length ? ` (${photoIds.length} ảnh)` : ''}`);
+    await reportComment(cfg); await refreshLicense(cfg);
+    try {
+      const { commentHistory = [] } = await chrome.storage.local.get('commentHistory');
+      commentHistory.unshift({ postId: '', groupId, productName: null, link: link || null, comment: message, permalink: res.postUrl, score: null, mode: 'post', time: Date.now() });
+      while (commentHistory.length > 500) commentHistory.pop();
+      await chrome.storage.local.set({ commentHistory });
+    } catch {}
+  } else {
+    await pushLog('error', `✗ Đăng bài "${gName}" thất bại: ${JSON.stringify(res.errors || '')}`);
+  }
+  return res;
+}
+
 // ─── Một bước scheduler: chọn 1 item phù hợp rồi đăng ─────────────────────────
 // manual=true (bấm "Đăng 1 comment"): bỏ qua check auto/delay, đăng item đầu hàng đợi.
 async function processOneStep(opts = {}) {
@@ -764,6 +995,7 @@ function buildCatalogContext(catalog) {
 async function discoverGroups(opts = {}) {
   const { cfg, catalog } = await getCfg();
   requireApiKey(cfg);
+  await clearCancel();
   await pushLog('info', 'Đang lấy danh sách nhóm đã tham gia…');
   await setProgress({ phase: 'discover', current: 0, total: 0, label: 'Đang lấy danh sách nhóm đã tham gia…' });
   const creds = await getCreds();
@@ -776,7 +1008,9 @@ async function discoverGroups(opts = {}) {
 
   // Chấm điểm theo lô 15 nhóm/lần (nhanh + rẻ)
   const scoreById = new Map();
+  let hardErr = null;
   for (let i = 0; i < subset.length; i += 15) {
+    if (await isCancelled()) { await pushLog('info', '■ Đã dừng chấm điểm theo yêu cầu.'); break; }
     const chunk = subset.slice(i, i + 15);
     await setProgress({ phase: 'discover', current: i, total: subset.length, label: `Chấm điểm nhóm ${i + 1}–${Math.min(i + 15, subset.length)}/${subset.length}…` });
     await pushLog('info', `AI chấm điểm nhóm ${i + 1}–${Math.min(i + 15, subset.length)}/${subset.length}…`);
@@ -786,8 +1020,13 @@ async function discoverGroups(opts = {}) {
         const g = chunk[r.i];
         if (g) scoreById.set(g.groupId, { score: r.score ?? 0, potential: !!r.potential, reason: r.reason || '', niche: r.niche || '' });
       }
-    } catch (e) { /* lô lỗi → để điểm mặc định */ }
+    } catch (e) {
+      if (e?.code && HARD_AI_ERRORS.has(e.code)) { hardErr = e; break; }   // hết trần AI / chưa cấu hình → dừng
+      /* lô lỗi mềm → để điểm mặc định */
+    }
   }
+  // Cả mẻ fail vì lỗi cứng → ném ra để báo rõ cho người dùng (thay vì "thành công" mà toàn điểm trống).
+  if (hardErr && scoreById.size === 0) throw hardErr;
 
   const analyzed = groups.map(g => ({
     ...g,
@@ -817,15 +1056,17 @@ async function suggestNiches() {
 async function searchGroupsByKeyword(keyword) {
   const { cfg, catalog } = await getCfg();
   requireApiKey(cfg);
-  const creds = await getCreds();
+  const creds = await ensureCreds();
   const kws = String(keyword || '').split(',').map(s => s.trim()).filter(Boolean);
   if (!kws.length) throw new Error('Chưa nhập từ khoá tìm nhóm');
 
-  if (!creds.dtsg || !creds.uid) throw new Error('Chưa kết nối Facebook — mở 1 tab facebook.com đã đăng nhập rồi thử lại');
+  if (!creds.dtsg || !creds.uid) throw new Error('Chưa đăng nhập Facebook — hãy đăng nhập facebook.com trong trình duyệt này rồi thử lại.');
+  await clearCancel();
   const joinedIds = new Set((await getCfg()).discoveredGroups.map(g => g.groupId));
   const byId = new Map();
   let firstError = null;
   for (const kw of kws) {
+    if (await isCancelled()) { await pushLog('info', '■ Đã dừng tìm nhóm theo yêu cầu.'); break; }
     try {
       const { groups } = await self.ShopeFbApi.fbSearchGroups(runFetchInFbTab, creds, kw, null);
       for (const g of groups) if (g.groupId && !byId.has(g.groupId)) byId.set(g.groupId, { ...g, joined: g.joined || joinedIds.has(g.groupId) });
@@ -843,6 +1084,7 @@ async function searchGroupsByKeyword(keyword) {
   const catalogContext = buildCatalogContext(catalog);
   const scoreById = new Map();
   for (let i = 0; i < results.length; i += 15) {
+    if (await isCancelled()) { await pushLog('info', '■ Đã dừng chấm điểm theo yêu cầu.'); break; }
     const chunk = results.slice(i, i + 15);
     await setProgress({ phase: 'search', current: i, total: results.length, label: `Chấm điểm nhóm ${i + 1}–${Math.min(i + 15, results.length)}/${results.length}…` });
     await pushLog('info', `AI chấm điểm nhóm ${i + 1}–${Math.min(i + 15, results.length)}/${results.length}…`);
@@ -902,13 +1144,15 @@ chrome.action.onClicked.addListener(async () => {
   const { cfg } = await getCfg();
   const base = (cfg.webBase || 'http://localhost:3000').replace(/\/$/, '');
   const appUrl = base + '/app/';
+  // Nếu /app đã mở ở đâu đó (tab hoặc popup) → focus lại
   const tabs = await chrome.tabs.query({ url: [base + '/app/*', 'https://toolmktai.com/app/*', 'http://localhost:3000/app/*'] });
-  if (tabs[0]?.id != null) {
+  if (tabs[0]?.id != null && tabs[0].windowId != null) {
     chrome.tabs.update(tabs[0].id, { active: true });
-    if (tabs[0].windowId != null) chrome.windows.update(tabs[0].windowId, { focused: true });
-  } else {
-    chrome.tabs.create({ url: appUrl });
+    chrome.windows.update(tabs[0].windowId, { focused: true });
+    return;
   }
+  // Mở CỬA SỔ POPUP riêng (như adsmeta) thay vì 1 tab
+  chrome.windows.create({ url: appUrl, type: 'popup', width: 1280, height: 860 });
 });
 
 // Khôi phục sau khi reload extension / mở lại Chrome:
@@ -968,7 +1212,7 @@ async function handle(request, sendResponse) {
   try {
     switch (request?.type) {
       case 'PING': sendResponse({ ok: true, version: chrome.runtime.getManifest().version }); break;
-      case 'GET_STATE': sendResponse({ ok: true, ...(await getCfg()), conn: await getConn() }); break;
+      case 'GET_STATE': sendResponse({ ok: true, ...(await getCfg()), conn: await getConn(), shopee: await getShopeeConn() }); break;
       case 'CONNECT_FB': sendResponse({ ok: true, conn: await connectFb() }); break;
       case 'CHECK_LICENSE': { const { cfg } = await getCfg(); const lic = await refreshLicense(cfg); sendResponse({ ok: true, license: lic }); break; }
       case 'SET_CFG': {
@@ -980,6 +1224,7 @@ async function handle(request, sendResponse) {
       case 'START_AUTO': await startAuto(); sendResponse({ ok: true }); break;
       case 'STOP_AUTO': await stopAuto(false); sendResponse({ ok: true }); break;
       case 'KILL': await stopAuto(true); sendResponse({ ok: true }); break;
+      case 'CANCEL_RUN': await chrome.storage.session.set({ cancelRun: true }); sendResponse({ ok: true }); break;
       case 'IMPORT_CSV': {
         const products = self.ShopeCatalog.parseCsv(request.csv || '');
         await save({ catalog: products });
@@ -1002,6 +1247,8 @@ async function handle(request, sendResponse) {
       case 'SUGGEST_NICHES': { const kw = await suggestNiches(); sendResponse({ ok: true, keywords: kw }); break; }
       case 'SEARCH_GROUPS': { const r = await searchGroupsByKeyword(request.keyword); sendResponse({ ok: true, count: r.length, groups: r }); break; }
       case 'JOIN_GROUP': { const res = await joinGroupById(request.groupId); sendResponse({ ok: res.ok, error: res.ok ? '' : JSON.stringify(res.errors || 'join_failed') }); break; }
+      case 'POST_GROUP': { const r = await postToGroup(request.groupId, request.message || '', request.link || '', { bgPresetId: request.bgPresetId || '', images: request.images || [] }); sendResponse({ ok: r.ok, error: r.ok ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), postUrl: r.postUrl || '', quotaBlocked: !!r.quotaBlocked }); break; }
+      case 'AI_REWRITE': { try { const t = await aiRewrite(request.text || ''); sendResponse({ ok: !!t, text: t, error: t ? '' : 'AI không trả về nội dung' }); } catch (e) { sendResponse({ ok: false, error: String(e?.message || e) }); } break; }
       case 'GET_GROUPS': { const { discoveredGroups, groupsSyncedAt } = await getCfg(); sendResponse({ ok: true, groups: discoveredGroups, syncedAt: groupsSyncedAt }); break; }
       case 'SET_TARGETS': {
         const { cfg } = await getCfg();
@@ -1009,19 +1256,57 @@ async function handle(request, sendResponse) {
         sendResponse({ ok: true });
         break;
       }
+      case 'SAVE_GROUP_LIST': {
+        const { savedGroupLists } = await getCfg();
+        const list = { id: 'gl_' + Date.now().toString(36), name: String(request.name || 'Danh sách').slice(0, 60), groupIds: [...new Set(request.groupIds || [])], createdAt: Date.now() };
+        await save({ savedGroupLists: [list, ...savedGroupLists].slice(0, 50) });
+        sendResponse({ ok: true, list });
+        break;
+      }
+      case 'DELETE_GROUP_LIST': {
+        const { savedGroupLists } = await getCfg();
+        await save({ savedGroupLists: savedGroupLists.filter(l => l.id !== request.id) });
+        sendResponse({ ok: true });
+        break;
+      }
+      case 'SAVE_POST': {
+        const { savedPosts } = await getCfg();
+        const p = request.post || {};
+        const post = { id: 'pp_' + Date.now().toString(36), title: String(p.title || (p.content || '').trim().split('\n')[0] || 'Bài không tên').slice(0, 80), content: p.content || '', link: p.link || '', bgPresetId: p.bgPresetId || '', createdAt: Date.now() };
+        await save({ savedPosts: [post, ...savedPosts].slice(0, 100) });
+        sendResponse({ ok: true, post });
+        break;
+      }
+      case 'DELETE_POST': {
+        const { savedPosts } = await getCfg();
+        await save({ savedPosts: savedPosts.filter(p => p.id !== request.id) });
+        sendResponse({ ok: true });
+        break;
+      }
       case 'SCAN_NOW': {
         const { cfg } = await getCfg();
         const nGroups = cfg.groupIds.length || 1;
+        await clearCancel();
         await pushLog('info', `▶ Quét thử ${cfg.groupIds.length} nhóm mục tiêu…`);
         await setProgress({ phase: 'scan', current: 0, total: nGroups, label: 'Bắt đầu quét…' });
-        let total = 0;
+        let total = 0, hardErr = null, stopped = false;
         try {
           for (let i = 0; i < nGroups; i++) {
+            if (await isCancelled()) { stopped = true; await pushLog('info', '■ Đã dừng quét theo yêu cầu.'); break; }
             await setProgress({ phase: 'scan', current: i, total: nGroups, label: `Quét nhóm ${i + 1}/${nGroups}…` });
             try { total += await refillQueue({ fresh: true }); }
-            catch (e) { await pushLog('error', `Quét nhóm lỗi: ${e?.message || e}`); }
+            catch (e) {
+              if (e?.code && HARD_AI_ERRORS.has(e.code)) { hardErr = e; break; }   // hết trần AI / chưa cấu hình / bị chặn → dừng, khỏi lặp lỗi
+              await pushLog('error', `Quét nhóm lỗi: ${e?.message || e}`);
+            }
           }
-        } finally { await endProgress(`Quét xong: +${total} bài`); }
+        } finally { await endProgress(stopped ? `Đã dừng: +${total} bài` : `Quét xong: +${total} bài`); }
+        if (stopped) { sendResponse({ ok: true, stopped: true, queued: total }); break; }
+        if (hardErr) {
+          await pushLog('error', `⛔ ${hardErr.message}`);
+          sendResponse({ ok: false, error: hardErr.message, code: hardErr.code, queued: total });
+          break;
+        }
         await pushLog('success', `Quét xong: +${total} bài vào hàng chờ duyệt`);
         sendResponse({ ok: true, queued: total });
         break;

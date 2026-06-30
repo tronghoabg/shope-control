@@ -1,13 +1,14 @@
 import { useState } from 'react'
-import { IconRadar2, IconExternalLink, IconStarFilled, IconUsersGroup, IconX, IconTarget } from '@tabler/icons-react'
+import { IconRadar2, IconExternalLink, IconStarFilled, IconUsersGroup, IconX, IconTarget, IconBookmark, IconPlayerStop } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
+import { ext } from '../ext.js'
 import { Card, Btn, Badge, Empty, Hint } from '../ui.jsx'
 
 const scoreColor = (s) => s == null ? 'gray' : s >= 70 ? 'green' : s >= 40 ? 'yellow' : 'red'
 const FILTERS = [{ k: 'all', l: 'Tất cả' }, { k: 'potential', l: 'Tiềm năng' }, { k: 'weak', l: 'Kém' }]
 
 export default function Groups() {
-  const { s, hasKey, call } = useShope()
+  const { s, aiReady, call, notify } = useShope()
   const [scanning, setScanning] = useState(false)
   const [filter, setFilter] = useState('all')
   if (!s) return <p className="text-slate-500">Đang tải…</p>
@@ -27,6 +28,12 @@ export default function Groups() {
   const removeTarget = (id) => saveTargets(targets.filter(x => x !== id))
   const clearTargets = () => saveTargets([])
   const addGood = () => saveTargets([...targets, ...groups.filter(g => (g.score ?? 0) >= 70).map(g => g.groupId)])
+  const saveList = () => {
+    if (!targets.length) return
+    const name = window.prompt('Tên danh sách nhóm mục tiêu:', `Danh sách ${new Date().toLocaleDateString('vi')}`)
+    if (name === null) return
+    call({ type: 'SAVE_GROUP_LIST', name: name.trim() || 'Danh sách', groupIds: targets }, { okMsg: 'Đã lưu danh sách (xem ở Đã lưu)' })
+  }
 
   const scan = async () => {
     setScanning(true)
@@ -39,7 +46,9 @@ export default function Groups() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-slate-100">Nhóm của tôi</h1>
-        <Btn variant="primary" icon={IconRadar2} loading={scanning} disabled={!hasKey} onClick={scan}>Quét &amp; chấm điểm</Btn>
+        {scanning
+          ? <Btn variant="danger" icon={IconPlayerStop} onClick={() => { ext({ type: 'CANCEL_RUN' }); notify('blue', 'Đang dừng…') }}>Dừng</Btn>
+          : <Btn variant="primary" icon={IconRadar2} disabled={!aiReady} onClick={scan}>Quét &amp; chấm điểm</Btn>}
       </div>
 
       <Hint id="groups">
@@ -53,7 +62,12 @@ export default function Groups() {
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
             <IconTarget size={16} className="text-indigo-400" /> Nhóm mục tiêu ({targets.length})
           </div>
-          {targets.length > 0 && <Btn size="sm" variant="ghost" className="text-red-400" onClick={clearTargets}>Xoá tất cả</Btn>}
+          {targets.length > 0 && (
+            <div className="flex gap-1.5">
+              <Btn size="sm" variant="ghost" icon={IconBookmark} onClick={saveList}>Lưu danh sách</Btn>
+              <Btn size="sm" variant="ghost" className="text-red-400" onClick={clearTargets}>Xoá tất cả</Btn>
+            </div>
+          )}
         </div>
         {targets.length === 0 ? (
           <p className="text-sm text-slate-500">Chưa chọn nhóm nào. Tick vào nhóm bên dưới (hoặc <b>Chọn nhóm tốt</b>) để thêm vào mục tiêu — tool chỉ rải link/comment ở các nhóm này.</p>
@@ -83,7 +97,15 @@ export default function Groups() {
             ))}
           </div>
           <Btn size="sm" icon={IconStarFilled} onClick={addGood} disabled={!groups.length}>Chọn nhóm tốt</Btn>
-          <Btn size="sm" variant="ghost" onClick={() => saveTargets([...targets, ...shown.map(g => g.groupId)])} disabled={!shown.length}>Chọn tất cả</Btn>
+          <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300">
+            <input type="checkbox" disabled={!shown.length}
+              checked={shown.length > 0 && shown.every(g => targetSet.has(g.groupId))}
+              onChange={() => shown.length && shown.every(g => targetSet.has(g.groupId))
+                ? saveTargets(targets.filter(id => !shown.some(g => g.groupId === id)))
+                : saveTargets([...targets, ...shown.map(g => g.groupId)])}
+              className="h-4 w-4 accent-indigo-500" />
+            Chọn tất cả
+          </label>
         </div>
       </Card>
 
@@ -91,7 +113,7 @@ export default function Groups() {
         {groups.length === 0 ? (
           <Empty icon={IconUsersGroup}>
             Chưa có dữ liệu. Bấm <b>Quét &amp; chấm điểm</b> để lấy nhóm đã tham gia + AI đánh giá.
-            {!hasKey && <div className="mt-1 text-amber-400">Cần nhập API key trước (trang Cài đặt).</div>}
+            {!aiReady && <div className="mt-1 text-amber-400">Cần đăng nhập tài khoản (dùng AI hệ thống) hoặc nhập API key riêng — trang Cài đặt.</div>}
           </Empty>
         ) : (
           <div className="max-h-[30rem] divide-y divide-slate-800 overflow-y-auto">

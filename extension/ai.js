@@ -5,7 +5,7 @@
 const AI_DEFAULT_MODELS = {
   anthropic: 'claude-haiku-4-5-20251001',
   openai: 'gpt-4o-mini',
-  gemini: 'gemini-2.0-flash',
+  gemini: 'gemini-2.5-flash',
 };
 
 function pickKey(cfg) {
@@ -17,11 +17,35 @@ function pickModel(cfg) {
   return (cfg.models || {})[cfg.provider] || AI_DEFAULT_MODELS[cfg.provider];
 }
 
+// Gọi AI HỆ THỐNG (managed) qua web app: extension không có key riêng → dùng key của admin.
+// Hạn mức/chống lạm dụng do server kiểm. Cần licenseToken (đăng nhập) + webBase.
+async function callAIManaged(cfg, opts) {
+  const base = (cfg.webBase || '').replace(/\/$/, '');
+  const r = await fetch(base + '/api/ai', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + (cfg.licenseToken || '') },
+    body: JSON.stringify({ system: opts.system, messages: opts.messages, temperature: opts.temperature, maxTokens: opts.maxTokens, json: !!opts.json }),
+  });
+  let j = {}; try { j = await r.json(); } catch {}
+  if (!r.ok) {
+    let msg = j?.error;
+    if (!msg) msg = r.status === 401 ? 'Phiên đăng nhập hết hạn — đăng nhập lại trên web rồi mở lại công cụ.' : `AI hệ thống lỗi ${r.status}`;
+    const e = new Error(msg); e.code = j?.code || (r.status === 401 ? 'UNAUTHORIZED' : 'HTTP_' + r.status); throw e;
+  }
+  return j.text || '';
+}
+
 // opts: { system, messages:[{role,content}], maxTokens, temperature, json }
 async function callAI(cfg, opts) {
   const provider = cfg.provider || 'anthropic';
+  const byok = ((cfg.apiKeys || {})[provider] || '').trim();
+  // Không nhập key riêng → dùng AI hệ thống (theo gói). Có key → gọi thẳng provider.
+  if (!byok) {
+    if (cfg.webBase && cfg.licenseToken) return callAIManaged(cfg, opts);
+    throw new Error('Chưa có API key — để trống để dùng AI hệ thống (cần đăng nhập tài khoản trên web), hoặc nhập key riêng ở Cài đặt.');
+  }
   const model = pickModel(cfg);
-  const key = pickKey(cfg);
+  const key = byok;
   const maxTokens = opts.maxTokens ?? 500;
 
   if (provider === 'anthropic') {
@@ -131,6 +155,19 @@ Chỉ trả JSON: {"potential": bool, "score": 0-100, "intent": string, "reason"
 }
 
 // ─── Comment dạo: bình luận tự nhiên, KHÔNG link, KHÔNG bán hàng ──────────────
+// Comment dạo có SẴN nội dung tìm khách → AI viết lại biến thể cho từng bài (chống trùng/spam).
+async function varySeedComment(cfg, postText, groupName, seed, tone) {
+  const system = `Bạn là người bán hàng đi tìm khách trên Facebook, viết comment ${tone || 'tự nhiên, thân thiện'}.
+Bạn có 1 NỘI DUNG GỐC (lời mời/tìm khách). Hãy VIẾT LẠI thành 1 comment KHÁC để thả dưới bài đăng:
+- Giữ nguyên Ý CHÍNH & lời mời của NỘI DUNG GỐC (sản phẩm/dịch vụ, cách liên hệ, số điện thoại/link nếu có).
+- ĐỔI cách diễn đạt/câu chữ để KHÔNG trùng khi đăng nhiều nơi (tránh bị gắn cờ spam).
+- Cho hợp ngữ cảnh bài đăng một chút nếu phù hợp; tự nhiên như người thật, 1-3 câu, tối đa 1-2 emoji.
+- Nếu bài không hợp (tin buồn nặng, nhạy cảm, chính trị) → skip.
+Chỉ trả JSON: {"comment": string|null, "skip": bool, "reason": string}`;
+  const user = `Nhóm: ${groupName || '(không rõ)'}\nNỘI DUNG GỐC:\n"""\n${String(seed).slice(0, 1500)}\n"""\n\nBài đăng:\n"""\n${String(postText).slice(0, 1500)}\n"""`;
+  return callAIJson(cfg, { system, messages: [{ role: 'user', content: user }], maxTokens: 400, temperature: 1.0 });
+}
+
 async function socialComment(cfg, postText, groupName, tone) {
   const system = `Bạn bình luận dạo trên Facebook như một người thật, ${tone || 'thân thiện, tự nhiên'}.
 Cho 1 bài đăng, viết 1 comment NGẮN (1-2 câu) hợp ngữ cảnh: đồng cảm / khen / hỏi thêm / góp vui.
@@ -243,4 +280,4 @@ Chỉ trả JSON: {"keywords": string[]}`;
   return Array.isArray(out?.keywords) ? out.keywords.filter(Boolean) : [];
 }
 
-self.ShopeAI = { callAI, callAIJson, classifyPost, suggestProduct, socialComment, extractSearchKeyword, analyzeGroup, analyzeGroupsBatch, suggestNicheKeywords, AI_DEFAULT_MODELS };
+self.ShopeAI = { callAI, callAIJson, classifyPost, suggestProduct, socialComment, varySeedComment, extractSearchKeyword, analyzeGroup, analyzeGroupsBatch, suggestNicheKeywords, AI_DEFAULT_MODELS };

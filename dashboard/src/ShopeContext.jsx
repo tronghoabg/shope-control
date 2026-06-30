@@ -88,8 +88,10 @@ export function ShopeProvider({ children }) {
 
   const provider = s?.cfg?.provider || 'anthropic'
   const hasKey = !!((s?.cfg?.apiKeys || {})[provider] || '').trim()
+  // AI do hệ thống cung cấp → chỉ cần đăng nhập tài khoản là dùng được.
+  const aiReady = !!account?.loggedIn
 
-  const value = { s, connected, hasKey, account, refresh, refreshAccount, connectFb, call, setCfg, notify, toasts }
+  const value = { s, connected, hasKey, aiReady, account, refresh, refreshAccount, connectFb, call, setCfg, notify, toasts }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 
