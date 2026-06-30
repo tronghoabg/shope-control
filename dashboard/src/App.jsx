@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   IconLayoutDashboard, IconUsersGroup, IconListCheck, IconShoppingCart,
-  IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink, IconUserCircle, IconCrown, IconSend, IconBookmark, IconHelp, IconLogout, IconShieldLock, IconBuildingStore,
+  IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink, IconUserCircle, IconCrown, IconSend, IconBookmark, IconHelp, IconLogout, IconShieldLock, IconBuildingStore, IconTestPipe,
 } from '@tabler/icons-react'
 
 const PLAN_NAME = { free: 'Miễn phí', basic: 'Cơ bản', pro: 'Chuyên', business: 'Đại lý' }
@@ -50,6 +50,7 @@ import Overview from './pages/Overview.jsx'
 import Discover from './pages/Discover.jsx'
 import Groups from './pages/Groups.jsx'
 import Pages from './pages/Pages.jsx'
+import ShopeeTest from './pages/ShopeeTest.jsx'
 import PostGroups from './pages/PostGroups.jsx'
 import Saved from './pages/Saved.jsx'
 import Queue from './pages/Queue.jsx'
@@ -72,6 +73,7 @@ const NAV = [
   { key: 'posted', label: 'Đã đăng', icon: IconChecks, render: () => <Posted /> },
   { key: 'catalog', label: 'Catalog', icon: IconShoppingCart, render: () => <Catalog /> },
   { key: 'linktool', label: 'Tạo link (test)', icon: IconLink, render: () => <LinkTool /> },
+  { key: 'shopeetest', label: 'Lấy link (test)', icon: IconTestPipe, render: () => <ShopeeTest /> },
   { key: 'logs', label: 'Nhật ký', icon: IconHistory, render: () => <Logs /> },
   { key: 'guide', label: 'Hướng dẫn', icon: IconHelp, render: (goto) => <Guide goto={goto} /> },
   { key: 'settings', label: 'Cài đặt', icon: IconSettings, render: () => <Settings /> },
@@ -82,7 +84,7 @@ const NAV_BY_KEY = Object.fromEntries(NAV.map(n => [n.key, n]))
 const SECTIONS = [
   { title: null, keys: ['overview'] },
   { title: 'Bán hàng', keys: ['discover', 'groups', 'pages', 'postgroups', 'queue'] },
-  { title: 'Dữ liệu', keys: ['saved', 'posted', 'catalog', 'linktool'] },
+  { title: 'Dữ liệu', keys: ['saved', 'posted', 'catalog', 'linktool', 'shopeetest'] },
   { title: 'Hệ thống', keys: ['logs', 'guide', 'settings'] },
 ]
 

@@ -23,6 +23,7 @@ const DEFAULTS = {
   requireApproval: true,      // true = chỉ đăng item đã được duyệt trong web app
   mode: 'affiliate',          // 'affiliate' = rải link Shopee · 'social' = comment dạo (không link, không cần catalog)
   seedContent: '',            // Comment dạo: nội dung tìm khách có sẵn → AI đổi lại mỗi bài (rỗng = AI tự soạn theo bài)
+  shopeeFocusTab: true,       // Rải link Shopee: focus tab Shopee 1 nhịp khi tìm SP (chống tab nền bị đóng băng). Tắt để test.
   licenseToken: '',           // token tài khoản (lấy ở web Dashboard) — để đồng bộ hạn mức free/Pro
   webBase: 'https://toolmktai.com', // địa chỉ web SaaS production (auto-link sẽ ghi đè theo origin khi mở /app)
   productSource: 'catalog',   // (chế độ affiliate) 'catalog' = CSV tự nạp · 'shopee' = AI tự nghĩ SP + search Shopee + dựng link
@@ -35,11 +36,12 @@ const DEFAULTS = {
 const HARD_AI_ERRORS = new Set(['AI_CAP', 'NO_SYSTEM_KEY', 'BANNED', 'RATE_LIMIT', 'TOO_LARGE', 'UNAUTHORIZED']);
 
 async function getCfg() {
-  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license', 'savedGroupLists', 'savedPosts', 'targetPages', 'pageSearchResults']);
+  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license', 'savedGroupLists', 'savedPosts', 'targetPages', 'savedPageLists', 'pageSearchResults']);
   return {
     savedGroupLists: s.savedGroupLists || [],   // [{ id, name, groupIds:[], createdAt }]
     savedPosts: s.savedPosts || [],             // [{ id, title, content, link, bgPresetId, createdAt }]
     targetPages: s.targetPages || [],           // [{ pageId, name, url, icon }] — page mục tiêu comment dạo
+    savedPageLists: s.savedPageLists || [],     // [{ id, name, pages:[{pageId,name,url,icon}], createdAt }]
     pageSearchResults: s.pageSearchResults || [], // [{ pageId, name, url, icon, snippet }]
     progress: s.progress || { active: false, phase: '', label: '', current: 0, total: 0, updatedAt: 0 },
     cfg: { ...DEFAULTS, ...(s.cfg || {}) },
@@ -498,31 +500,34 @@ async function getShopeeScrapeTab() {
   return tab.id;
 }
 
-async function searchShopeeDom(keyword, limit = 10) {
+async function searchShopeeDom(keyword, limit = 10, opts = {}) {
   const kw = String(keyword || '').trim();
   if (!kw) return [];
+  const { cfg } = await getCfg();
+  // opts.focus (true/false) ghi đè cfg để TEST; mặc định theo cfg.shopeeFocusTab (BẬT).
+  const doFocus = opts.focus !== undefined ? !!opts.focus : (cfg.shopeeFocusTab !== false);
   const tabId = await getShopeeScrapeTab();
   const url = `https://shopee.vn/search?keyword=${encodeURIComponent(kw)}`;
 
-  // Nhớ tab/cửa sổ đang active để TRẢ focus lại sau khi scrape xong.
+  // Nhớ tab/cửa sổ đang active để TRẢ focus lại sau khi scrape xong (chỉ khi bật focus).
   let prev = null;
-  try {
-    const w = await chrome.windows.getLastFocused();
-    const [act] = await chrome.tabs.query({ active: true, windowId: w.id });
-    if (act && act.id !== tabId) prev = { tabId: act.id, windowId: w.id };
-  } catch {}
+  if (doFocus) {
+    try {
+      const w = await chrome.windows.getLastFocused();
+      const [act] = await chrome.tabs.query({ active: true, windowId: w.id });
+      if (act && act.id !== tabId) prev = { tabId: act.id, windowId: w.id };
+    } catch {}
+  }
 
-  // Điều hướng + FOCUS tab Shopee: tab ẩn bị 'đóng băng' nên Shopee không render kết quả.
-  // Phải hiện tab này 1 nhịp để nó render, rồi trả focus về tab cũ.
-  let winId = null;
+  // BẬT focus: hiện tab Shopee 1 nhịp để render (tab nền hay bị 'đóng băng') rồi trả focus.
+  // TẮT focus: chỉ điều hướng nền (active:false) — để test xem Shopee còn render & scrape được không.
   try {
-    await chrome.tabs.update(tabId, { url, active: true });
-    winId = (await chrome.tabs.get(tabId)).windowId;
-    if (winId != null) await chrome.windows.update(winId, { focused: true });
+    await chrome.tabs.update(tabId, { url, active: doFocus });
+    if (doFocus) { const winId = (await chrome.tabs.get(tabId)).windowId; if (winId != null) await chrome.windows.update(winId, { focused: true }); }
   } catch {
     await chrome.storage.session.remove('shopeeTabId');
     const t = await getShopeeScrapeTab();
-    await chrome.tabs.update(t, { url, active: true });
+    await chrome.tabs.update(t, { url, active: doFocus });
   }
 
   const scrape = async (tId) => {
@@ -563,7 +568,7 @@ async function searchShopeeDom(keyword, limit = 10) {
   }
 
   // Trả focus về tab/cửa sổ người dùng đang dùng (giảm "giật" màn hình).
-  if (prev) {
+  if (doFocus && prev) {
     try { await chrome.tabs.update(prev.tabId, { active: true }); if (prev.windowId != null) await chrome.windows.update(prev.windowId, { focused: true }); } catch {}
   }
 
@@ -1371,6 +1376,72 @@ async function handle(request, sendResponse) {
         sendResponse({ ok: true });
         break;
       }
+      case 'SAVE_PAGE_LIST': {
+        const { savedPageLists } = await getCfg();
+        const pages = (request.pages || []).map(p => ({ pageId: String(p.pageId), name: p.name || '', url: p.url || '', icon: p.icon || '' }));
+        const list = { id: 'pl_' + Date.now().toString(36), name: String(request.name || 'Danh sách').slice(0, 60), pages, createdAt: Date.now() };
+        await save({ savedPageLists: [list, ...savedPageLists].slice(0, 50) });
+        sendResponse({ ok: true, list });
+        break;
+      }
+      case 'DELETE_PAGE_LIST': {
+        const { savedPageLists } = await getCfg();
+        await save({ savedPageLists: savedPageLists.filter(l => l.id !== request.id) });
+        sendResponse({ ok: true });
+        break;
+      }
+      // Liệt kê bài viết gần đây của các Page (KHÔNG dùng AI lọc) → để user TỰ chọn bài cần comment.
+      case 'LIST_PAGE_POSTS': {
+        const { cfg, targetPages, commentedPosts } = await getCfg();
+        const pages = (request.pages && request.pages.length ? request.pages : targetPages) || [];
+        if (!pages.length) { sendResponse({ ok: false, error: 'Chưa chọn Page mục tiêu' }); break; }
+        await clearCancel();
+        const creds = await ensureCreds();
+        if (!creds.dtsg || !creds.uid) { sendResponse({ ok: false, error: 'Chưa đăng nhập Facebook' }); break; }
+        await setProgress({ phase: 'scan', current: 0, total: pages.length, label: 'Đang lấy bài từ Page…' });
+        const out = [];
+        try {
+          for (let i = 0; i < pages.length; i++) {
+            if (await isCancelled()) break;
+            const page = pages[i];
+            await setProgress({ phase: 'scan', current: i, total: pages.length, label: `Lấy bài: ${page.name || page.pageId}…` });
+            let feed;
+            try { feed = await self.ShopeFbApi.fbFetchPageFeed(runFetchInFbTab, creds, String(page.pageId), null, request.count || cfg.postsPerScan || 8); }
+            catch (e) { await pushLog('error', `Đọc feed page lỗi: ${e?.message || e}`, { group: page.pageId, kind: 'post' }); continue; }
+            for (const post of (feed.posts || [])) {
+              out.push({
+                postId: post.postId, feedbackId: post.feedbackId, text: post.text || '',
+                permalink: post.permalink, authorName: post.authorName || '',
+                pageId: String(page.pageId), pageName: page.name || '',
+                already: !!commentedPosts[post.postId],
+              });
+            }
+          }
+        } finally { await endProgress(`Đã lấy ${out.length} bài từ Page`); }
+        sendResponse({ ok: true, posts: out });
+        break;
+      }
+      // Thêm các bài Page user đã chọn (kèm nội dung tự đặt) vào hàng chờ duyệt.
+      case 'ADD_PAGE_POSTS_TO_QUEUE': {
+        const { queue } = await getCfg();
+        const items = request.posts || [];
+        const newQueue = [...queue];
+        let added = 0;
+        for (const p of items) {
+          if (!p.postId || newQueue.some(q => q.postId === p.postId)) continue;
+          newQueue.push({
+            postId: String(p.postId), feedbackId: p.feedbackId || null, text: p.text || '',
+            comment: String(p.comment || '').trim(), productName: null, link: null, score: null,
+            mode: 'social', groupId: '', pageId: String(p.pageId || ''), pageName: p.pageName || '',
+            isPage: true, manual: true, permalink: p.permalink || '',
+          });
+          added++;
+        }
+        await save({ queue: newQueue });
+        await pushLog('success', `Đã thêm ${added} bài Page (tự chọn) vào hàng chờ`);
+        sendResponse({ ok: true, added });
+        break;
+      }
       case 'SCAN_PAGES': {
         const nPages = (await getCfg()).targetPages.length;
         await pushLog('info', `▶ Quét ${nPages} page mục tiêu…`);
@@ -1492,6 +1563,14 @@ async function handle(request, sendResponse) {
         const subIds = buildSubIds(request.subId || '');
         const results = await makeBatchLinks(links.map(originalLink => ({ originalLink, subIds })));
         sendResponse({ ok: true, results });
+        break;
+      }
+      case 'TEST_SHOPEE_SEARCH': {
+        const t0 = Date.now();
+        try {
+          const items = await searchShopeeDom(request.keyword || '', request.limit || 10, { focus: request.focus });
+          sendResponse({ ok: true, items, ms: Date.now() - t0, focus: request.focus !== false });
+        } catch (e) { sendResponse({ ok: false, error: String(e?.message || e), ms: Date.now() - t0 }); }
         break;
       }
       case 'GET_CREDS': sendResponse({ ok: true, creds: await getCreds() }); break;

@@ -72,7 +72,7 @@ export default function Queue() {
     const minD = Math.max(MIN_DELAY, cfgL.minDelaySec || MIN_DELAY)   // ép sàn 90s
     const maxD = Math.max(minD, cfgL.maxDelaySec || minD)
     setLocal({ ...cfgL, minDelaySec: minD, maxDelaySec: maxD })
-    setCfg({ dailyCap: cfgL.dailyCap, minDelaySec: minD, maxDelaySec: maxD, minScore: cfgL.minScore, postsPerScan: cfgL.postsPerScan, requireApproval: cfgL.requireApproval, subId: cfgL.subId, shopeeLimit: cfgL.shopeeLimit })
+    setCfg({ dailyCap: cfgL.dailyCap, minDelaySec: minD, maxDelaySec: maxD, minScore: cfgL.minScore, postsPerScan: cfgL.postsPerScan, requireApproval: cfgL.requireApproval, subId: cfgL.subId, shopeeLimit: cfgL.shopeeLimit, shopeeFocusTab: cfgL.shopeeFocusTab })
     if ((cfgL.minDelaySec || 0) < MIN_DELAY) notify('blue', `Delay tối thiểu 90s (an toàn) — đã đặt về ${minD}s`)
   }
   const act = (type, postId, extra, timeout) => call({ type, postId, ...(extra || {}) }, { timeout })
