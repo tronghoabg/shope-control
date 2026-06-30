@@ -37,7 +37,7 @@ export function Logo({ size = 9 }: { size?: number }) {
       <LogoMark size={size * 4} />
       <div>
         <div className="font-bold leading-tight text-slate-100">ToolMKT AI</div>
-        <div className="text-[11px] text-slate-500">Rải link Shopee bằng AI</div>
+        <div className="text-[11px] text-slate-500">Tìm khách &amp; bán hàng Facebook bằng AI</div>
       </div>
     </Link>
   )
