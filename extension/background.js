@@ -632,27 +632,35 @@ async function affBatchSW(linkParams) {
   return arr;
 }
 
-// BATCH qua tab affiliate.shopee.vn (mượn SDK của trang ký request).
+// BATCH qua tab affiliate.shopee.vn — dùng XMLHttpRequest để SDK chống-bot của trang
+// (hook XHR.prototype.send) tự gắn x-sap-sec / af-ac-enc-* / x-sz-sdk-version cho request.
 async function affBatchTab(linkParams) {
   const tabId = await getAffiliateTab();
   const inj = await chrome.scripting.executeScript({
     target: { tabId }, world: 'MAIN',
     args: [linkParams, AFF_GQL_URL, AFF_GQL_QUERY],
-    func: async (linkParams, url, query) => {
+    func: (linkParams, url, query) => new Promise((resolve) => {
       try {
         const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
-        const r = await fetch(url, {
-          method: 'POST', credentials: 'include', mode: 'cors',
-          headers: { 'accept': 'application/json, text/plain, */*', 'content-type': 'application/json; charset=UTF-8', 'affiliate-program-type': '1', ...(csrf ? { 'csrf-token': csrf } : {}) },
-          body: JSON.stringify({ operationName: 'batchGetCustomLink', query, variables: { linkParams, sourceCaller: 'CUSTOM_LINK_CALLER' } }),
-        });
-        const txt = await r.text();
-        let j; try { j = JSON.parse(txt); } catch { return { __error: `non-JSON ${r.status}: ${txt.slice(0, 120)}` }; }
-        const arr = j?.data?.batchCustomLink;
-        if (!Array.isArray(arr)) return { __error: 'no_data: ' + JSON.stringify(j).slice(0, 200) };
-        return { __data: arr };
-      } catch (e) { return { __error: String(e?.message || e) }; }
-    },
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url, true);
+        xhr.withCredentials = true;
+        xhr.setRequestHeader('content-type', 'application/json; charset=UTF-8');
+        xhr.setRequestHeader('accept', 'application/json, text/plain, */*');
+        xhr.setRequestHeader('affiliate-program-type', '1');
+        if (csrf) xhr.setRequestHeader('csrf-token', csrf);
+        xhr.onload = () => {
+          let j; try { j = JSON.parse(xhr.responseText); } catch { resolve({ __error: `non-JSON ${xhr.status}: ${String(xhr.responseText).slice(0, 120)}` }); return; }
+          const arr = j?.data?.batchCustomLink;
+          if (Array.isArray(arr)) resolve({ __data: arr });
+          else resolve({ __error: 'no_data: ' + JSON.stringify(j).slice(0, 200) });
+        };
+        xhr.onerror = () => resolve({ __error: 'xhr_error' });
+        xhr.ontimeout = () => resolve({ __error: 'xhr_timeout' });
+        xhr.timeout = 25000;
+        xhr.send(JSON.stringify({ operationName: 'batchGetCustomLink', query, variables: { linkParams, sourceCaller: 'CUSTOM_LINK_CALLER' } }));
+      } catch (e) { resolve({ __error: String(e?.message || e) }); }
+    }),
   });
   const res = inj?.[0]?.result;
   if (res?.__data) return res.__data;
@@ -663,16 +671,18 @@ async function affBatchTab(linkParams) {
 // → [{ originalLink, ok, shortLink, longLink, via, error }]
 async function makeBatchLinks(items) {
   const linkParams = items.map(it => buildLinkParam(it.originalLink, it.subIds));
-  let eSW = null;
-  try {
-    const arr = await affBatchSW(linkParams);
-    return arr.map((x, i) => ({ originalLink: items[i].originalLink, via: 'sw', ...mapLinkResult(x) }));
-  } catch (e) { eSW = e; }
+  // ƯU TIÊN TAB: trang affiliate.shopee.vn có SDK tự ký x-sap-sec/af-ac-enc-* cho mỗi request.
+  // (SW không ký được → Shopee trả failCode; chỉ dùng SW làm fallback khi không mở được tab.)
+  let eTab = null;
   try {
     const arr = await affBatchTab(linkParams);
     return arr.map((x, i) => ({ originalLink: items[i].originalLink, via: 'tab', ...mapLinkResult(x) }));
-  } catch (eTab) {
-    return items.map(it => ({ originalLink: it.originalLink, ok: false, error: `sw: ${eSW?.message || eSW} | tab: ${eTab?.message || eTab}` }));
+  } catch (e) { eTab = e; }
+  try {
+    const arr = await affBatchSW(linkParams);
+    return arr.map((x, i) => ({ originalLink: items[i].originalLink, via: 'sw', ...mapLinkResult(x) }));
+  } catch (eSW) {
+    return items.map(it => ({ originalLink: it.originalLink, ok: false, error: `tab: ${eTab?.message || eTab} | sw: ${eSW?.message || eSW}` }));
   }
 }
 
@@ -767,13 +777,19 @@ async function refillQueue(opts = {}) {
       // Nguồn Shopee tự động: đổi URL trần → link hoa hồng thật (API custom-link của trang Affiliate).
       if (cfg.productSource === 'shopee') {
         await setProgress({ label: `${gName}: bài ${_pi}/${posts.length} · tạo link affiliate…` });
-        const r = await makeAffiliateLink(sug.link, buildSubIds(cfg.subId), { group: groupId, kind: 'post' });
+        let r = await makeAffiliateLink(sug.link, buildSubIds(cfg.subId));
+        if (!(r?.ok && r.shortLink)) {   // thử lại 1 lần (lỗi thường do rate-limit/tab chưa sẵn)
+          await new Promise(res => setTimeout(res, 1500));
+          r = await makeAffiliateLink(sug.link, buildSubIds(cfg.subId));
+        }
         if (r?.ok && r.shortLink) {
           finalLink = r.shortLink;
           finalComment = sug.comment.split(sug.link).join(r.shortLink);
           await pushLog('success', `🔗 Link hoa hồng (${r.via}): ${r.shortLink}`, { group: groupId, kind: 'post' });
         } else {
-          await pushLog('error', `Tạo link affiliate lỗi (${r?.error || '?'}) — tạm dùng link thường`, { group: groupId, kind: 'post' });
+          // KHÔNG rải link thường (không có hoa hồng = vô nghĩa) → bỏ bài, báo cách khắc phục.
+          await pushLog('error', `✕ Bỏ bài: chưa tạo được link hoa hồng (${r?.error || '?'}). Mở sẵn 1 tab affiliate.shopee.vn đã đăng nhập rồi thử lại.`, { group: groupId, kind: 'post' });
+          continue;
         }
       }
       item = { comment: finalComment, productName: sug.productName, link: finalLink, score: sug.score };
