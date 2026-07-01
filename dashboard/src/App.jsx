@@ -53,7 +53,8 @@ import Pages from './pages/Pages.jsx'
 import ShopeeTest from './pages/ShopeeTest.jsx'
 import PostGroups from './pages/PostGroups.jsx'
 import Saved from './pages/Saved.jsx'
-import Queue from './pages/Queue.jsx'
+import CommentGroups from './pages/CommentGroups.jsx'
+import CommentPages from './pages/CommentPages.jsx'
 import Posted from './pages/Posted.jsx'
 import Catalog from './pages/Catalog.jsx'
 import LinkTool from './pages/LinkTool.jsx'
@@ -64,16 +65,21 @@ import Guide from './pages/Guide.jsx'
 
 const NAV = [
   { key: 'overview', label: 'Tổng quan', icon: IconLayoutDashboard, render: (goto) => <Overview goto={goto} /> },
-  { key: 'discover', label: 'Tham gia nhóm', icon: IconCompass, render: () => <Discover /> },
-  { key: 'groups', label: 'Nhóm của tôi', icon: IconUsersGroup, render: () => <Groups /> },
-  { key: 'pages', label: 'Page mục tiêu', icon: IconBuildingStore, render: (goto) => <Pages goto={goto} /> },
+  // TÌM KHÁCH — luồng comment trọn gói (chọn mục tiêu → bắt đầu → danh sách bài → đăng)
+  { key: 'cmtgroups', label: 'Comment Nhóm', icon: IconUsersGroup, render: () => <CommentGroups /> },
+  { key: 'cmtpages', label: 'Comment Page', icon: IconBuildingStore, render: (goto) => <CommentPages goto={goto} /> },
   { key: 'postgroups', label: 'Đăng bài nhóm', icon: IconSend, render: () => <PostGroups /> },
+  // CHUẨN BỊ — tạo & lưu danh sách mục tiêu (làm 1 lần)
+  { key: 'discover', label: 'Tham gia nhóm', icon: IconCompass, render: () => <Discover /> },
+  { key: 'groups', label: 'Nhóm của tôi', icon: IconListCheck, render: () => <Groups /> },
+  { key: 'pages', label: 'Tìm Page', icon: IconCompass, render: (goto) => <Pages goto={goto} /> },
+  // DỮ LIỆU
   { key: 'saved', label: 'Đã lưu', icon: IconBookmark, render: () => <Saved /> },
-  { key: 'queue', label: 'Comment dạo', icon: IconListCheck, render: () => <Queue /> },
   { key: 'posted', label: 'Đã đăng', icon: IconChecks, render: () => <Posted /> },
   { key: 'catalog', label: 'Catalog', icon: IconShoppingCart, render: () => <Catalog /> },
   { key: 'linktool', label: 'Tạo link (test)', icon: IconLink, render: () => <LinkTool /> },
   { key: 'shopeetest', label: 'Lấy link (test)', icon: IconTestPipe, render: () => <ShopeeTest /> },
+  // HỆ THỐNG
   { key: 'logs', label: 'Nhật ký', icon: IconHistory, render: () => <Logs /> },
   { key: 'guide', label: 'Hướng dẫn', icon: IconHelp, render: (goto) => <Guide goto={goto} /> },
   { key: 'settings', label: 'Cài đặt', icon: IconSettings, render: () => <Settings /> },
@@ -83,7 +89,8 @@ const NAV = [
 const NAV_BY_KEY = Object.fromEntries(NAV.map(n => [n.key, n]))
 const SECTIONS = [
   { title: null, keys: ['overview'] },
-  { title: 'Bán hàng', keys: ['discover', 'groups', 'pages', 'postgroups', 'queue'] },
+  { title: 'Chuẩn bị', keys: ['discover', 'groups', 'pages'] },
+  { title: 'Tìm khách', keys: ['cmtgroups', 'cmtpages', 'postgroups'] },
   { title: 'Dữ liệu', keys: ['saved', 'posted', 'catalog', 'linktool', 'shopeetest'] },
   { title: 'Hệ thống', keys: ['logs', 'guide', 'settings'] },
 ]
@@ -104,7 +111,7 @@ function StatusChip({ ok, icon: Icon, label, title, onClick }) {
 export default function App() {
   const { s, connected, aiReady, connectFb, account } = useShope()
   const [page, setPage] = useState('overview')
-  const [showLogs, setShowLogs] = useState(true)
+  const [showLogs, setShowLogs] = useState(false)   // log đã nhúng trong từng trang comment; panel phải chỉ bật khi cần
   const conn = s?.conn
   const shopee = s?.shopee
   const queueCount = s?.queue?.length ?? 0

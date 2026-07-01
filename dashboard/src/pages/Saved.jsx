@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { IconBookmark, IconTrash, IconTargetArrow, IconDeviceFloppy, IconFileText, IconUsersGroup } from '@tabler/icons-react'
+import { IconBookmark, IconTrash, IconTargetArrow, IconDeviceFloppy, IconFileText, IconUsersGroup, IconBuildingStore } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { Section, Btn, Card, Badge, Empty, Hint, Input } from '../ui.jsx'
 
@@ -9,6 +9,7 @@ export default function Saved() {
   if (!s) return <p className="text-slate-500">Đang tải…</p>
 
   const lists = s.savedGroupLists || []
+  const pageLists = s.savedPageLists || []
   const posts = s.savedPosts || []
   const targets = s.cfg?.groupIds || []
 
@@ -25,14 +26,16 @@ export default function Saved() {
   }
   const apply = (l) => call({ type: 'SET_TARGETS', groupIds: l.groupIds }, { okMsg: `Đã áp dụng "${l.name}" (${l.groupIds.length} nhóm)` })
   const delList = (id) => call({ type: 'DELETE_GROUP_LIST', id }, { okMsg: 'Đã xoá danh sách' })
+  const applyPages = (l) => call({ type: 'SET_TARGET_PAGES', pages: l.pages }, { okMsg: `Đã áp dụng "${l.name}" (${l.pages.length} page)` })
+  const delPageList = (id) => call({ type: 'DELETE_PAGE_LIST', id }, { okMsg: 'Đã xoá danh sách page' })
   const delPost = (id) => call({ type: 'DELETE_POST', id }, { okMsg: 'Đã xoá bài' })
 
   return (
     <div className="space-y-5">
       <h1 className="text-xl font-bold text-slate-100">Đã lưu</h1>
       <Hint id="saved">
-        Lưu sẵn <b>danh sách nhóm mục tiêu</b> (đổi chiến dịch 1 chạm) và <b>bài viết mẫu</b> (tái dùng khi đăng).
-        Lưu nhóm mục tiêu ở đây; lưu bài viết từ trang <b>Đăng bài nhóm</b>.
+        Quản lý mọi thứ đã lưu: <b>danh sách nhóm</b>, <b>danh sách Page</b> (đổi chiến dịch 1 chạm) và <b>bài viết mẫu</b>.
+        Bấm <b>Áp dụng</b> để đặt làm mục tiêu hiện tại; <b>Xoá</b> để gỡ.
       </Hint>
 
       {/* Nhóm mục tiêu đã lưu */}
@@ -54,6 +57,27 @@ export default function Saved() {
                 <Badge color="gray">{l.groupIds.length}</Badge>
                 <Btn size="sm" variant="primary" icon={IconTargetArrow} onClick={() => apply(l)}>Áp dụng</Btn>
                 <Btn size="sm" variant="ghost" icon={IconTrash} className="text-red-400" onClick={() => delList(l.id)}>Xoá</Btn>
+              </Card>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {/* Page mục tiêu đã lưu */}
+      <Section title={<span className="flex items-center gap-2"><IconBuildingStore size={16} className="text-indigo-400" /> Danh sách Page mục tiêu ({pageLists.length})</span>}>
+        {pageLists.length === 0 ? (
+          <Empty icon={IconBookmark}>Chưa lưu danh sách Page nào. Chọn Page ở <b>Tìm Page</b> / <b>Comment Page</b> rồi lưu.</Empty>
+        ) : (
+          <div className="space-y-2">
+            {pageLists.map(l => (
+              <Card key={l.id} className="flex flex-wrap items-center gap-3 p-3">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-slate-100">{l.name}</div>
+                  <div className="truncate text-xs text-slate-500">{l.pages.length} page · {l.pages.slice(0, 3).map(p => p.name || p.pageId).join(', ')}{l.pages.length > 3 ? '…' : ''}</div>
+                </div>
+                <Badge color="gray">{l.pages.length}</Badge>
+                <Btn size="sm" variant="primary" icon={IconTargetArrow} onClick={() => applyPages(l)}>Áp dụng</Btn>
+                <Btn size="sm" variant="ghost" icon={IconTrash} className="text-red-400" onClick={() => delPageList(l.id)}>Xoá</Btn>
               </Card>
             ))}
           </div>

@@ -45,7 +45,7 @@ export default function Pages({ goto }) {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-slate-100">Page mục tiêu</h1>
-        <Btn variant="ghost" icon={IconListCheck} onClick={() => goto?.('queue')}>Sang Comment dạo →</Btn>
+        <Btn variant="ghost" icon={IconListCheck} onClick={() => goto?.('cmtpages')}>Sang Comment Page →</Btn>
       </div>
 
       <Hint id="pages">
