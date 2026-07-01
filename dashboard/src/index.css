@@ -3,13 +3,68 @@
 @tailwind utilities;
 
 html, body, #root { height: 100%; }
-body { @apply bg-slate-950 text-slate-200 antialiased; }
 
-/* Scrollbar tối */
-* { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
-*::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb { background: #334155; border-radius: 8px; }
-*::-webkit-scrollbar-track { background: transparent; }
+body {
+  @apply bg-slate-950 text-slate-200 antialiased;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.1) 0%, transparent 60%), 
+    radial-gradient(circle at 100% 100%, rgba(249, 115, 22, 0.04) 0%, transparent 40%), 
+    linear-gradient(to bottom, #020617, #0b1329);
+  background-attachment: fixed;
+}
 
-/* Placeholder + autofill cho input nền tối */
-input::placeholder, textarea::placeholder { @apply text-slate-500; }
+/* Custom Scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(71, 85, 105, 0.5) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.5);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.6);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Input placeholder styling */
+input::placeholder, textarea::placeholder {
+  @apply text-slate-500;
+}
+
+/* Subtle border animation */
+@keyframes borderGlow {
+  0%, 100% { border-color: rgba(99, 102, 241, 0.2); }
+  50% { border-color: rgba(99, 102, 241, 0.6); }
+}
+
+.animate-glow {
+  animation: borderGlow 4s infinite ease-in-out;
+}
+
+/* Glassmorphism styling helper */
+.glass-card {
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glass-card:hover {
+  border-color: rgba(99, 102, 241, 0.25);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3), inset 0 0 1px rgba(99, 102, 241, 0.1);
+}
+
+/* Form inputs premium hover state */
+.premium-input {
+  @apply bg-slate-900/60 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-100 outline-none transition-all duration-200;
+}
+.premium-input:focus {
+  @apply border-indigo-500/80 bg-slate-900/90 ring-1 ring-indigo-500/50 shadow-[0_0_12px_rgba(99,102,241,0.15)];
+}

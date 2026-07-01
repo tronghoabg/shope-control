@@ -8,41 +8,48 @@ const PLAN_NAME = { free: 'Miễn phí', basic: 'Cơ bản', pro: 'Chuyên', bus
 
 function AccountBox({ account, onManage }) {
   const a = account
-  if (a === null) return <div className="mt-auto border-t border-slate-800 p-3 text-[11px] text-slate-600">Đang tải tài khoản…</div>
+  if (a === null) return <div className="mt-auto border-t border-slate-800/50 p-4 text-xs text-slate-500">Đang tải tài khoản…</div>
   if (!a.loggedIn) return (
-    <div className="mt-auto border-t border-slate-800 p-3">
-      <a href="/login" className="flex items-center gap-2.5 rounded-lg p-2 hover:bg-slate-800">
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-700 text-slate-300"><IconUserCircle size={20} /></div>
-        <div><div className="text-sm font-medium text-slate-200">Đăng nhập</div><div className="text-[11px] text-slate-500">Để áp gói &amp; hạn mức →</div></div>
-      </a>
+    <div className="mt-auto border-t border-slate-800/50 p-3 bg-slate-950/20">
+      <button onClick={onManage} className="flex w-full items-center gap-3 rounded-xl p-2.5 border border-slate-800 bg-slate-900/40 hover:bg-slate-900/80 transition-colors">
+        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-800 text-slate-400 border border-slate-700"><IconUserCircle size={18} /></div>
+        <div className="min-w-0 flex-1 text-left">
+          <div className="text-xs font-semibold text-slate-300">Đăng nhập</div>
+          <div className="text-[10px] text-slate-500 truncate">Kích hoạt AI & Hạn mức</div>
+        </div>
+      </button>
     </div>
   )
   const pro = a.plan && a.plan !== 'free'
-  const usedTxt = a.remaining === -1 ? 'Không giới hạn' : `${a.usedToday ?? 0}/${a.dailyLimit ?? 5} hôm nay`
+  const usedTxt = a.remaining === -1 ? 'Không giới hạn' : `${a.usedToday ?? 0}/${a.dailyLimit ?? 5}`
   const initial = (a.name || a.email || '?')[0].toUpperCase()
   return (
-    <div className="mt-auto border-t border-slate-800 p-3">
-      <button onClick={onManage} className="flex w-full items-center gap-2.5 rounded-lg p-2 text-left hover:bg-slate-800">
-        <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-semibold ${pro ? 'bg-amber-500/20 text-amber-400' : 'bg-indigo-600 text-white'}`}>
-          {pro ? <IconCrown size={18} /> : initial}
+    <div className="mt-auto border-t border-slate-800/50 p-3 bg-slate-950/25">
+      <button onClick={onManage} className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left border border-slate-800/80 bg-slate-900/30 hover:bg-slate-900/60 transition-colors">
+        <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-xs font-extrabold border ${
+          pro 
+            ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' 
+            : 'bg-indigo-600 text-white border-indigo-500/30'
+        }`}>
+          {pro ? <IconCrown size={15} /> : initial}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-slate-100">{a.name || a.email}</div>
-          <div className="truncate text-[11px] text-slate-500">{a.email}</div>
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <span className={pro ? 'font-medium text-amber-400' : 'text-slate-500'}>{PLAN_NAME[a.plan] || 'Miễn phí'}</span>
-            <span className="text-slate-600">·</span>
-            <span className="text-slate-500">{usedTxt}</span>
+          <div className="truncate text-xs font-bold text-slate-200">{a.name || a.email}</div>
+          <div className="flex items-center gap-1.5 text-[10px] mt-0.5">
+            <span className={pro ? 'font-bold text-amber-400' : 'text-slate-500'}>{PLAN_NAME[a.plan] || 'Free'}</span>
+            <span className="text-slate-700">·</span>
+            <span className="text-slate-500 truncate">{usedTxt}</span>
           </div>
         </div>
       </button>
       <a href="/api/auth/signout?callbackUrl=/"
-        className="mt-1.5 flex items-center justify-center gap-2 rounded-lg border border-slate-800 px-2 py-1.5 text-xs font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-200">
-        <IconLogout size={14} /> Đăng xuất
+        className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-slate-850 py-1.5 text-[10px] font-semibold text-slate-500 hover:bg-red-950/20 hover:text-red-400 hover:border-red-900/30 transition-all">
+        <IconLogout size={12} /> Đăng xuất
       </a>
     </div>
   )
 }
+
 import { useShope } from './ShopeContext.jsx'
 import { Spinner, LogoMark } from './ui.jsx'
 import LogPanel from './LogPanel.jsx'
@@ -50,14 +57,13 @@ import Overview from './pages/Overview.jsx'
 import Discover from './pages/Discover.jsx'
 import Groups from './pages/Groups.jsx'
 import Pages from './pages/Pages.jsx'
-import ShopeeTest from './pages/ShopeeTest.jsx'
+import Tools from './pages/Tools.jsx'
 import PostGroups from './pages/PostGroups.jsx'
 import Saved from './pages/Saved.jsx'
 import CommentGroups from './pages/CommentGroups.jsx'
 import CommentPages from './pages/CommentPages.jsx'
 import Posted from './pages/Posted.jsx'
 import Catalog from './pages/Catalog.jsx'
-import LinkTool from './pages/LinkTool.jsx'
 import Logs from './pages/Logs.jsx'
 import Settings from './pages/Settings.jsx'
 import Account from './pages/Account.jsx'
@@ -65,45 +71,48 @@ import Guide from './pages/Guide.jsx'
 
 const NAV = [
   { key: 'overview', label: 'Tổng quan', icon: IconLayoutDashboard, render: (goto) => <Overview goto={goto} /> },
-  // TÌM KHÁCH — luồng comment trọn gói (chọn mục tiêu → bắt đầu → danh sách bài → đăng)
-  { key: 'cmtgroups', label: 'Comment Nhóm', icon: IconUsersGroup, render: () => <CommentGroups /> },
-  { key: 'cmtpages', label: 'Comment Page', icon: IconBuildingStore, render: (goto) => <CommentPages goto={goto} /> },
-  { key: 'postgroups', label: 'Đăng bài nhóm', icon: IconSend, render: () => <PostGroups /> },
-  // CHUẨN BỊ — tạo & lưu danh sách mục tiêu (làm 1 lần)
-  { key: 'discover', label: 'Tham gia nhóm', icon: IconCompass, render: () => <Discover /> },
+  // VẬN HÀNH CHIẾN DỊCH
+  { key: 'cmtgroups', label: 'Rải link Nhóm', icon: IconUsersGroup, render: () => <CommentGroups /> },
+  { key: 'cmtpages', label: 'Rải link Fanpage', icon: IconBuildingStore, render: (goto) => <CommentPages goto={goto} /> },
+  { key: 'postgroups', label: 'Đăng bài tự động', icon: IconSend, render: () => <PostGroups /> },
+  // MỤC TIÊU & NGUỒN LỰC
+  { key: 'discover', label: 'Tìm kiếm Nhóm', icon: IconCompass, render: () => <Discover /> },
   { key: 'groups', label: 'Nhóm của tôi', icon: IconListCheck, render: () => <Groups /> },
-  { key: 'pages', label: 'Tìm Page', icon: IconCompass, render: (goto) => <Pages goto={goto} /> },
-  // DỮ LIỆU
-  { key: 'saved', label: 'Đã lưu', icon: IconBookmark, render: () => <Saved /> },
-  { key: 'posted', label: 'Đã đăng', icon: IconChecks, render: () => <Posted /> },
-  { key: 'catalog', label: 'Catalog', icon: IconShoppingCart, render: () => <Catalog /> },
-  { key: 'linktool', label: 'Tạo link (test)', icon: IconLink, render: () => <LinkTool /> },
-  { key: 'shopeetest', label: 'Lấy link (test)', icon: IconTestPipe, render: () => <ShopeeTest /> },
-  // HỆ THỐNG
-  { key: 'logs', label: 'Nhật ký', icon: IconHistory, render: () => <Logs /> },
-  { key: 'guide', label: 'Hướng dẫn', icon: IconHelp, render: (goto) => <Guide goto={goto} /> },
-  { key: 'settings', label: 'Cài đặt', icon: IconSettings, render: () => <Settings /> },
-  // 'account' không nằm trong SECTIONS → không hiện ở sidebar, chỉ mở khi bấm ô tài khoản
+  { key: 'pages', label: 'Tìm Fanpage', icon: IconCompass, render: (goto) => <Pages goto={goto} /> },
+  { key: 'catalog', label: 'Catalog sản phẩm', icon: IconShoppingCart, render: () => <Catalog /> },
+  { key: 'saved', label: 'Mục tiêu đã lưu', icon: IconBookmark, render: () => <Saved /> },
+  // BÁO CÁO & HỆ THỐNG
+  { key: 'posted', label: 'Lịch sử đã đăng', icon: IconChecks, render: () => <Posted /> },
+  { key: 'logs', label: 'Nhật ký chạy', icon: IconHistory, render: () => <Logs /> },
+  { key: 'tools', label: 'Công cụ debug', icon: IconLink, render: () => <Tools /> },
+  { key: 'settings', label: 'Cấu hình AI', icon: IconSettings, render: () => <Settings /> },
+  { key: 'guide', label: 'Tài liệu hướng dẫn', icon: IconHelp, render: (goto) => <Guide goto={goto} /> },
+  // 'account' không nằm trong SECTIONS
   { key: 'account', label: 'Tài khoản', icon: IconUserCircle, render: () => <Account /> },
 ]
+
 const NAV_BY_KEY = Object.fromEntries(NAV.map(n => [n.key, n]))
 const SECTIONS = [
   { title: null, keys: ['overview'] },
-  { title: 'Chuẩn bị', keys: ['discover', 'groups', 'pages'] },
-  { title: 'Tìm khách', keys: ['cmtgroups', 'cmtpages', 'postgroups'] },
-  { title: 'Dữ liệu', keys: ['saved', 'posted', 'catalog', 'linktool', 'shopeetest'] },
-  { title: 'Hệ thống', keys: ['logs', 'guide', 'settings'] },
+  { title: 'Vận hành chiến dịch', keys: ['cmtgroups', 'cmtpages', 'postgroups'] },
+  { title: 'Mục tiêu & Nguồn lực', keys: ['discover', 'groups', 'pages', 'catalog', 'saved'] },
+  { title: 'Hệ thống & Báo cáo', keys: ['posted', 'logs', 'tools', 'settings', 'guide'] },
 ]
 
-// Chip trạng thái kết nối ở header (xanh = ok, đỏ = chưa). Có onClick thì bấm được.
+// Chip trạng thái kết nối ở header (xanh = ok, đỏ = chưa)
 function StatusChip({ ok, icon: Icon, label, title, onClick }) {
-  const cls = ok ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+  const cls = ok 
+    ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400 hover:bg-emerald-500/10' 
+    : 'border-red-500/20 bg-red-500/5 text-red-400 hover:bg-red-500/10'
   return (
     <button type="button" onClick={onClick || undefined} title={title} disabled={!onClick}
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${cls} ${onClick ? 'cursor-pointer hover:brightness-125' : 'cursor-default'}`}>
-      <Icon size={13} />
+      className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold tracking-wide transition-all duration-200 ${cls} ${onClick ? 'cursor-pointer hover:scale-102' : 'cursor-default'}`}>
+      <Icon size={14} className="shrink-0" />
       <span className="hidden sm:inline">{label}</span>
-      <span className={`h-1.5 w-1.5 rounded-full ${ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
+      <span className="relative flex h-1.5 w-1.5 shrink-0">
+        {ok && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
+        <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
+      </span>
     </button>
   )
 }
@@ -119,7 +128,7 @@ export default function App() {
 
   useEffect(() => { if (connected && s && !aiReady) setPage('settings') }, [connected, s, aiReady])
 
-  // Sau vài giây vẫn chưa kết nối → coi như chưa cài extension (thay vì spinner treo mãi)
+  // Sau vài giây vẫn chưa kết nối
   const [notInstalled, setNotInstalled] = useState(false)
   useEffect(() => {
     if (connected && s) { setNotInstalled(false); return }
@@ -127,92 +136,90 @@ export default function App() {
     return () => clearTimeout(t)
   }, [connected, s])
 
-  // Chưa kết nối được extension → màn hình hướng dẫn rõ ràng (thay vì các trang treo "Đang tải…")
+  // Chưa kết nối được extension
   if (!connected || !s) {
-    // Đang trong vài giây đầu: hiện spinner "đang kết nối"
     if (!notInstalled) {
       return (
-        <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center animate-pulse">
           <LogoMark size={64} />
-          <div className="text-lg font-bold text-slate-100">ToolMKT AI</div>
-          <div className="flex items-center gap-2 text-sm text-slate-400"><Spinner className="text-slate-400" /> Đang kết nối extension…</div>
+          <div className="text-xl font-extrabold text-slate-100 tracking-tight">ToolMKT AI</div>
+          <div className="flex items-center gap-2.5 text-sm text-slate-400"><Spinner className="text-indigo-500 h-5 w-5 border-t-transparent" /> Đang thiết lập kết nối extension…</div>
         </div>
       )
     }
-    // Quá thời gian → chưa cài đặt extension, dẫn link tải
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+      <div className="flex h-full flex-col items-center justify-center gap-5 px-6 text-center">
         <LogoMark size={64} />
-        <div className="text-lg font-bold text-slate-100">Chưa cài đặt extension</div>
+        <div className="text-xl font-extrabold text-slate-100 tracking-tight">Chưa cài đặt extension cầu nối</div>
         <div className="max-w-md text-sm leading-relaxed text-slate-400">
-          Không tìm thấy extension <b>ToolMKT AI</b> trên trình duyệt. Hãy tải và cài đặt extension để bắt đầu sử dụng.
+          Không tìm thấy extension <b>ToolMKT AI</b> trên trình duyệt của bạn. Hãy cài đặt extension để bắt đầu tự động hóa Facebook.
         </div>
         <div className="flex flex-wrap items-center justify-center gap-3">
           <a download href="/extension.zip"
-            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-indigo-900/40 hover:bg-indigo-500">
-            <IconPlugConnected size={18} /> Tải Extension (Chrome)
+            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-900/30 hover:bg-indigo-500 transition-colors">
+            <IconPlugConnected size={18} /> Tải Extension (.ZIP)
           </a>
           <a href="/cai-dat"
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-5 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800">
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/40 px-5 py-3 text-sm font-semibold text-slate-200 hover:bg-slate-800 transition-colors">
             Hướng dẫn cài đặt
           </a>
         </div>
-        <div className="max-w-md text-xs leading-relaxed text-slate-500">
-          Đã cài rồi? Mở <code className="rounded bg-slate-800 px-1 text-slate-300">chrome://extensions</code> → bật <b>Developer mode</b> → <b>Load unpacked</b> thư mục <code className="rounded bg-slate-800 px-1 text-slate-300">extension/</code> (hoặc bấm ⟳ Reload), rồi <b>F5</b> trang này.
+        <div className="max-w-md text-xs leading-relaxed text-slate-500 bg-slate-900/30 border border-slate-800/60 p-4 rounded-2xl">
+          Đã cài rồi? Hãy mở <code className="rounded bg-slate-800/80 px-1.5 py-0.5 text-slate-300 font-mono">chrome://extensions</code> → bật <b>Chế độ nhà phát triển (Developer mode)</b> → chọn <b>Tải thư mục đã giải nén (Load unpacked)</b> thư mục <code className="rounded bg-slate-800/80 px-1.5 py-0.5 text-slate-300 font-mono">extension/</code>, sau đó bấm <b>F5 (Tải lại)</b> trang này.
         </div>
       </div>
     )
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col font-sans">
       {/* ════ TOP HEADER (full khung) ════ */}
-      <header className="grid h-14 shrink-0 grid-cols-3 items-center border-b border-slate-800 bg-slate-900/70 px-5">
+      <header className="grid h-16 shrink-0 grid-cols-3 items-center border-b border-slate-900/60 bg-slate-950/80 backdrop-blur-md px-6">
         {/* Trái: trạng thái kết nối */}
         <div className="flex items-center gap-2">
           <StatusChip ok={connected} icon={connected ? IconPlugConnected : IconPlugConnectedX} label="Extension"
-            title={connected ? 'Extension đã kết nối' : 'Chưa kết nối extension — Reload extension + F5'} />
+            title={connected ? 'Extension đã kết nối' : 'Chưa kết nối extension — Hãy tải lại extension'} />
           <StatusChip ok={!!conn?.connected} icon={IconBrandFacebook} label="Facebook"
-            title={conn?.connected ? `Facebook: ${conn.name || conn.id}` : 'Chưa kết nối Facebook — bấm để kết nối'}
+            title={conn?.connected ? `Facebook: ${conn.name || conn.id}` : 'Chưa kết nối Facebook — Bấm để kết nối'}
             onClick={conn?.connected ? null : () => connectFb(false)} />
           <StatusChip ok={!!shopee?.loggedIn} icon={IconShoppingCart} label="Shopee"
-            title={shopee?.loggedIn ? 'Shopee đã đăng nhập' : shopee?.hasTab ? 'Có tab Shopee nhưng chưa đăng nhập — bấm để mở' : 'Chưa mở Shopee — bấm để mở & đăng nhập'}
+            title={shopee?.loggedIn ? 'Shopee đã đăng nhập' : shopee?.hasTab ? 'Có tab Shopee nhưng chưa đăng nhập — Bấm để mở' : 'Chưa mở Shopee — Bấm để mở & đăng nhập'}
             onClick={shopee?.loggedIn ? null : () => window.open('https://shopee.vn', '_blank')} />
         </div>
 
         {/* Giữa: logo + thương hiệu (bấm về trang chủ) */}
         <a href="https://toolmktai.com" title="toolmktai.com — Về trang chủ"
-          className="flex items-center justify-center gap-2 transition hover:opacity-90">
-          <LogoMark size={28} />
+          className="flex items-center justify-center gap-2.5 transition hover:opacity-90">
+          <LogoMark size={30} />
           <div className="text-left leading-tight">
             <div className="bg-gradient-to-r from-orange-400 via-rose-400 to-violet-400 bg-clip-text text-base font-extrabold tracking-tight text-transparent">
               ToolMKT AI
             </div>
-            <div className="text-[10px] font-medium text-slate-400">
-              toolmktai.com · Tìm khách hàng trên Facebook
+            <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+              Hệ thống rải link tự động
             </div>
           </div>
         </a>
 
         {/* Phải: tài khoản Facebook (avatar FB) */}
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center justify-end gap-3">
           {!showLogs && (
             <button onClick={() => setShowLogs(true)} title="Hiện nhật ký"
-              className="flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-700">
-              <IconHistory size={14} />{logCount ? ` ${logCount}` : ''}
+              className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors">
+              <IconHistory size={16} />
             </button>
           )}
           {conn?.connected ? (
             <div title={`Facebook: ${conn.name || conn.id}`}
-              className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-800/60 py-0.5 pl-0.5 pr-2.5">
+              className="flex items-center gap-2 rounded-full border border-slate-800/80 bg-slate-900/30 py-1 pl-1 pr-3">
               {conn.picture
                 ? <img src={conn.picture} alt="" referrerPolicy="no-referrer" className="h-6 w-6 rounded-full object-cover" />
-                : <div className="grid h-6 w-6 place-items-center rounded-full bg-[#1877F2] text-white"><IconBrandFacebook size={13} /></div>}
-              <span className="max-w-[130px] truncate text-xs font-medium text-slate-200">{conn.name || conn.id}</span>
+                : <div className="grid h-6 w-6 place-items-center rounded-full bg-[#1877F2] text-white"><IconBrandFacebook size={12} /></div>}
+              <span className="max-w-[120px] truncate text-xs font-semibold text-slate-300">{conn.name || conn.id}</span>
             </div>
           ) : (
             <button onClick={() => connectFb(false)} disabled={!connected}
-              className="inline-flex items-center gap-1.5 rounded-full bg-[#1877F2] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-[#1668d8] disabled:opacity-40">
+              className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-500 disabled:opacity-40 transition-colors">
               <IconBrandFacebook size={14} /> Kết nối Facebook
             </button>
           )}
@@ -220,71 +227,79 @@ export default function App() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-      {/* ════ SIDEBAR ════ */}
-      <aside className="flex w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-900">
-        <nav className="mt-2 flex-1 overflow-y-auto px-2 pb-2">
-          {SECTIONS.map((sec, si) => (
-            <div key={si} className={si > 0 ? 'mt-3' : 'mt-1'}>
-              {sec.title && <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600">{sec.title}</div>}
-              <div className="flex flex-col gap-0.5">
-                {sec.keys.map(k => {
-                  const item = NAV_BY_KEY[k]
-                  const locked = !aiReady && item.key !== 'settings'
-                  const active = page === item.key
-                  return (
-                    <button key={item.key} disabled={locked} onClick={() => setPage(item.key)}
-                      className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors disabled:opacity-40
-                        ${active ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-900/40' : 'text-slate-300 hover:bg-slate-800'}`}>
-                      <item.icon size={18} />
-                      <span className="flex-1 text-left">{item.label}</span>
-                      {item.key === 'queue' && queueCount > 0 && (
-                        <span className="grid h-5 min-w-5 place-items-center rounded-full bg-orange-500 px-1 text-[11px] font-bold text-white">{queueCount}</span>
-                      )}
-                      {item.key === 'settings' && !aiReady && <span className="rounded bg-red-500/20 px-1.5 text-[10px] font-semibold text-red-400">cần</span>}
-                      {locked && <IconLock size={13} className="opacity-50" />}
-                    </button>
-                  )
-                })}
+        {/* ════ SIDEBAR ════ */}
+        <aside className="flex w-60 shrink-0 flex-col border-r border-slate-900/60 bg-slate-950/70 backdrop-blur-md">
+          <nav className="mt-4 flex-1 overflow-y-auto px-3 pb-3 space-y-4">
+            {SECTIONS.map((sec, si) => (
+              <div key={si} className="space-y-1">
+                {sec.title && <div className="px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-slate-600">{sec.title}</div>}
+                <div className="flex flex-col gap-0.5">
+                  {sec.keys.map(k => {
+                    const item = NAV_BY_KEY[k]
+                    const locked = !aiReady && item.key !== 'settings'
+                    const active = page === item.key
+                    return (
+                      <button 
+                        key={item.key} 
+                        disabled={locked} 
+                        onClick={() => setPage(item.key)}
+                        className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold tracking-wide transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed
+                          ${active 
+                            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-950/50 border border-indigo-500/20' 
+                            : 'text-slate-400 border border-transparent hover:text-slate-200 hover:bg-slate-900/40 hover:border-slate-900/50'
+                          }`}
+                      >
+                        <item.icon size={16} className={`shrink-0 ${active ? 'text-white' : 'text-slate-500 group-hover:text-slate-300 transition-colors'}`} />
+                        <span className="flex-1 text-left truncate">{item.label}</span>
+                        {item.key === 'queue' && queueCount > 0 && (
+                          <span className="grid h-5 min-w-5 place-items-center rounded-full bg-orange-500 px-1 text-[10px] font-bold text-white">{queueCount}</span>
+                        )}
+                        {item.key === 'settings' && !aiReady && <span className="rounded-md bg-red-500/10 px-1.5 py-0.5 text-[9px] font-bold text-red-400 border border-red-500/20">cần thiết</span>}
+                        {locked && <IconLock size={12} className="opacity-50 text-slate-600" />}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
 
-          {account?.isAdmin && (
-            <div className="mt-3">
-              <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600">Quản trị</div>
-              <a href="/admin"
-                className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-amber-400 transition-colors hover:bg-amber-500/10">
-                <IconShieldLock size={18} />
-                <span className="flex-1 text-left">Admin</span>
-              </a>
-            </div>
-          )}
-        </nav>
+            {account?.isAdmin && (
+              <div className="space-y-1">
+                <div className="px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-slate-600">Quản trị</div>
+                <a href="/admin"
+                  className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold tracking-wide text-amber-400 border border-transparent hover:border-amber-500/20 hover:bg-amber-500/5 transition-all">
+                  <IconShieldLock size={16} className="shrink-0" />
+                  <span className="flex-1 text-left">Admin Panel</span>
+                </a>
+              </div>
+            )}
+          </nav>
 
-        <AccountBox account={account} onManage={() => setPage('account')} />
-      </aside>
+          <AccountBox account={account} onManage={() => setPage('account')} />
+        </aside>
 
-      {/* ════ RIGHT: Container · Footer ════ */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/* ── CONTAINER ── */}
-        <div className="flex min-h-0 flex-1">
-          <main className="flex-1 overflow-y-auto bg-slate-950 p-6">
-            <div className="mx-auto max-w-5xl">
-              {NAV.find(n => n.key === page)?.render(setPage)}
-            </div>
-          </main>
-          {showLogs && <LogPanel onClose={() => setShowLogs(false)} />}
-        </div>
-
-        {/* ── FOOTER ── */}
-        <footer className="flex h-9 shrink-0 items-center justify-between border-t border-slate-800 bg-slate-900/50 px-5 text-xs text-slate-500">
-          <span>ToolMKT AI · v1.0</span>
-          <div className="flex items-center gap-4">
-            <button onClick={() => setPage('guide')} className="hover:text-slate-300">Hướng dẫn</button>
-            <a href="https://zalo.me/g/fsjwncgaupa915h891zx" target="_blank" rel="noreferrer" className="font-medium text-emerald-400 hover:text-emerald-300">💬 Nhóm hỗ trợ Zalo</a>
+        {/* ════ RIGHT: Container · Footer ════ */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* ── CONTAINER ── */}
+          <div className="flex min-h-0 flex-1">
+            <main className="flex-1 overflow-y-auto p-6 md:p-8">
+              <div className="mx-auto max-w-5xl space-y-6">
+                {NAV.find(n => n.key === page)?.render(setPage)}
+              </div>
+            </main>
+            {showLogs && <LogPanel onClose={() => setShowLogs(false)} />}
           </div>
-        </footer>
-      </div>
+
+          {/* ── FOOTER ── */}
+          <footer className="flex h-11 shrink-0 items-center justify-between border-t border-slate-900/60 bg-slate-950/40 px-6 text-xs text-slate-500 backdrop-blur-sm">
+            <span>ToolMKT AI · Phiên bản 1.0</span>
+            <div className="flex items-center gap-4">
+              <button onClick={() => setPage('guide')} className="hover:text-slate-300 font-medium">Tài liệu</button>
+              <span className="text-slate-700">|</span>
+              <a href="https://zalo.me/g/fsjwncgaupa915h891zx" target="_blank" rel="noreferrer" className="font-semibold text-emerald-400 hover:text-emerald-300 transition-colors">💬 Nhóm hỗ trợ Zalo</a>
+            </div>
+          </footer>
+        </div>
       </div>
     </div>
   )

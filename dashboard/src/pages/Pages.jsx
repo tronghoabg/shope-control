@@ -9,7 +9,7 @@ export default function Pages({ goto }) {
   const [keyword, setKeyword] = useState('')
   const [searching, setSearching] = useState(false)
   const [listName, setListName] = useState('')
-  if (!s) return <p className="text-slate-500">Đang tải…</p>
+  if (!s) return <p className="text-slate-500">Đang tải danh sách Fanpage…</p>
 
   const results = s.pageSearchResults || []
   const targets = s.targetPages || []
@@ -42,92 +42,108 @@ export default function Pages({ goto }) {
   const activeList = (l) => l.pages.length > 0 && l.pages.length === targets.length && l.pages.every(p => targetIds.has(p.pageId))
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-slate-100">Page mục tiêu</h1>
-        <Btn variant="ghost" icon={IconListCheck} onClick={() => goto?.('cmtpages')}>Sang Comment Page →</Btn>
+    <div className="space-y-6 animate-fadeIn">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-900/65 pb-4">
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight">Tìm kiếm Fanpage mục tiêu</h1>
+          <p className="text-sm text-slate-400">Tìm kiếm các trang Fanpage lớn cùng lĩnh vực để tiếp cận tệp khách hàng tiềm năng.</p>
+        </div>
+        <div>
+          <Btn variant="ghost" icon={IconListCheck} onClick={() => goto?.('cmtpages')}>Vận hành rải Fanpage →</Btn>
+        </div>
       </div>
 
       <Hint id="pages">
-        Trang này chỉ để <b>chọn &amp; lưu danh sách Page mục tiêu</b> (Page lớn cùng ngành — nơi khách tụ tập).
-        {' '}Tìm page theo từ khoá → tick chọn → <b>Lưu danh sách</b>.
-        {' '}Khi muốn comment, sang <b>Comment dạo</b>: chọn danh sách Page đã lưu, <b>tự chọn bài</b> và <b>tự đặt nội dung</b> comment.
+        Tìm các trang Fanpage lớn (nơi khách hàng mục tiêu của bạn hay tương tác), tick chọn để đưa vào danh sách **Page mục tiêu**. Khi muốn rải comment, bạn có thể chuyển sang mục **Rải Fanpage** để cào các bài đăng mới nhất của họ.
       </Hint>
 
-      {/* Mục tiêu đang chọn */}
-      <Card className="p-4">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
-            <IconTarget size={16} className="text-indigo-400" /> Page mục tiêu ({targets.length})
+      {/* Target pages deck */}
+      <Card className="p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-850 pb-3">
+          <div className="flex items-center gap-2 text-sm font-bold text-slate-200">
+            <IconTarget size={18} className="text-indigo-400" />
+            <span>Danh sách Page mục tiêu đã chọn ({targets.length})</span>
           </div>
           {targets.length > 0 && (
-            <div className="flex items-center gap-2">
-              <Input className="w-48" value={listName} onChange={e => setListName(e.target.value)} placeholder="tên danh sách để lưu" />
-              <Btn size="sm" variant="ghost" icon={IconBookmark} onClick={saveList}>Lưu danh sách</Btn>
+            <div className="flex items-center gap-2.5">
+              <Input className="w-48 h-8.5 text-xs rounded-lg" value={listName} onChange={e => setListName(e.target.value)} placeholder="Tên Preset cần lưu…" />
+              <Btn size="sm" variant="primary" icon={IconBookmark} onClick={saveList}>Lưu Preset</Btn>
             </div>
           )}
         </div>
-        {targets.length === 0
-          ? <p className="text-sm text-slate-500">Chưa chọn page nào. Tìm bên dưới rồi tick chọn, hoặc áp một danh sách đã lưu.</p>
-          : <div className="flex flex-wrap gap-2">
+        
+        {targets.length === 0 ? (
+          <p className="text-xs text-slate-500 leading-normal">Chưa chọn trang nào. Tìm kiếm bên dưới và tích chọn các trang mục tiêu của bạn.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
             {targets.map(p => (
-              <span key={p.pageId} className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/15 py-1 pl-2 pr-1.5 text-xs text-indigo-200">
-                {p.icon && <img src={p.icon} alt="" referrerPolicy="no-referrer" className="h-5 w-5 rounded-full" />}
+              <span key={p.pageId} className="inline-flex items-center gap-2 rounded-full border border-indigo-500/20 bg-indigo-500/10 py-1 pl-2.5 pr-1.5 text-xs text-indigo-300 font-semibold select-none">
+                {p.icon && <img src={p.icon} alt="" referrerPolicy="no-referrer" className="h-5 w-5 rounded-full object-cover border border-slate-800" />}
                 <span className="max-w-[180px] truncate">{p.name}</span>
-                <button onClick={() => removeTarget(p.pageId)} className="rounded-full p-0.5 hover:bg-indigo-500/30"><IconX size={12} /></button>
+                <button onClick={() => removeTarget(p.pageId)} className="rounded-full p-0.5 hover:bg-indigo-500/30 text-indigo-400 hover:text-indigo-200 transition-colors"><IconX size={12} /></button>
               </span>
             ))}
-          </div>}
+          </div>
+        )}
       </Card>
 
-      {/* Danh sách đã lưu */}
+      {/* Saved Presets list */}
       {savedLists.length > 0 && (
-        <Card className="p-4">
-          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-100">
-            <IconBookmark size={16} className="text-indigo-400" /> Danh sách Page đã lưu
+        <Card className="p-4 space-y-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
+            <IconBookmark size={15} className="text-indigo-400" />
+            <span>Preset Page mục tiêu đã lưu:</span>
           </div>
           <div className="flex flex-wrap gap-2">
             {savedLists.map(l => (
-              <span key={l.id} className={`inline-flex items-center gap-1.5 rounded-full border py-1 pl-3 pr-1.5 text-xs ${activeList(l) ? 'border-indigo-500 bg-indigo-500/15 text-indigo-200' : 'border-slate-700 bg-slate-800 text-slate-200'}`}>
-                <button onClick={() => applyList(l)} className="hover:underline">{l.name} <span className="text-slate-500">({l.pages.length})</span></button>
-                <button onClick={() => deleteList(l)} className="rounded-full p-0.5 text-red-400 hover:bg-red-500/20"><IconTrash size={12} /></button>
+              <span key={l.id} className={`inline-flex items-center gap-2 rounded-full border py-1.5 pl-3 pr-2.5 text-xs font-semibold transition-all ${
+                activeList(l) 
+                  ? 'border-indigo-500/40 bg-indigo-500/15 text-indigo-200' 
+                  : 'border-slate-800 bg-slate-900/40 text-slate-350 hover:border-slate-700/60'
+              }`}>
+                <button onClick={() => applyList(l)} className="hover:underline">{l.name} <span className="text-slate-500">({l.pages.length} page)</span></button>
+                <button onClick={() => deleteList(l)} className="rounded-full p-0.5 text-red-400 hover:bg-red-500/10 transition-colors"><IconTrash size={12} /></button>
               </span>
             ))}
           </div>
         </Card>
       )}
 
-      {/* Tìm page */}
-      <Section title="Tìm Page theo từ khoá">
-        <div className="flex gap-2">
-          <Input placeholder="vd: mỹ phẩm, nước hoa, thời trang…" value={keyword}
+      {/* Search block */}
+      <Section title="Tìm kiếm Fanpage theo từ khóa">
+        <div className="flex gap-2.5">
+          <Input placeholder="Nhập ngành nghề hoặc chủ đề Fanpage (vd: nước hoa auth, thời trang công sở…)" value={keyword}
             onChange={e => setKeyword(e.target.value)} onKeyDown={e => e.key === 'Enter' && search()} />
           {searching
             ? <Btn variant="danger" icon={IconPlayerStop} className="shrink-0" onClick={() => { ext({ type: 'CANCEL_RUN' }); notify('blue', 'Đang dừng…') }}>Dừng</Btn>
-            : <Btn variant="primary" icon={IconSearch} className="shrink-0" disabled={!aiReady} onClick={() => search()}>Tìm</Btn>}
+            : <Btn variant="primary" icon={IconSearch} className="shrink-0" disabled={!aiReady} onClick={() => search()}>Tìm kiếm</Btn>}
         </div>
-        {!aiReady && <p className="mt-2 text-xs text-amber-400">Cần đăng nhập tài khoản để dùng (AI hệ thống).</p>}
+        {!aiReady && <p className="mt-2 text-xs text-amber-400">⚠️ Vui lòng đăng nhập tài khoản để sử dụng chức năng tìm kiếm Fanpage.</p>}
       </Section>
 
-      {/* Kết quả */}
-      <Card>
+      {/* Results grid */}
+      <Card className="p-0 overflow-hidden">
         {results.length === 0 ? (
-          <Empty icon={IconBuildingStore}>Chưa có kết quả. Tìm page theo từ khoá ở trên.</Empty>
+          <Empty icon={IconBuildingStore}>Chưa có kết quả tìm kiếm. Vui lòng nhập từ khóa chủ đề phía trên để quét.</Empty>
         ) : (
-          <div className="max-h-[30rem] divide-y divide-slate-800 overflow-y-auto">
+          <div className="max-h-[30rem] divide-y divide-slate-850 overflow-y-auto">
             {results.map(p => (
               <div key={p.pageId} onClick={() => toggle(p)}
-                className={`flex cursor-pointer items-start gap-3 p-3 hover:bg-slate-800/40 ${targetIds.has(p.pageId) ? 'bg-indigo-500/10' : ''}`}>
-                <input type="checkbox" checked={targetIds.has(p.pageId)} readOnly className="pointer-events-none mt-1 h-4 w-4 shrink-0 accent-indigo-500" />
+                className={`flex cursor-pointer items-start gap-4 p-4 hover:bg-slate-900/30 transition-colors ${targetIds.has(p.pageId) ? 'bg-indigo-500/[0.03]' : ''}`}>
+                <input type="checkbox" checked={targetIds.has(p.pageId)} readOnly className="pointer-events-none mt-1 h-4.5 w-4.5 accent-indigo-500 rounded border-slate-800 shrink-0" />
                 {p.icon
-                  ? <img src={p.icon} alt="" referrerPolicy="no-referrer" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
-                  : <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-700 text-sm font-semibold text-slate-300">{(p.name || '?')[0]}</div>}
+                  ? <img src={p.icon} alt="" referrerPolicy="no-referrer" className="h-10 w-10 shrink-0 rounded-xl bg-slate-800 object-cover" />
+                  : <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-800 text-sm font-extrabold text-slate-400 border border-slate-800">{(p.name || '?')[0]}</div>}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate font-medium text-slate-100">{p.name}</span>
-                    <a href={p.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-slate-500 hover:text-indigo-400"><IconExternalLink size={14} /></a>
+                    <span className="font-bold text-slate-200 text-xs truncate max-w-sm sm:max-w-md">{p.name}</span>
+                    {p.url && (
+                      <a href={p.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-slate-500 hover:text-indigo-400 h-6 w-6 rounded-lg hover:bg-slate-800 flex items-center justify-center">
+                        <IconExternalLink size={12} />
+                      </a>
+                    )}
                   </div>
-                  {p.snippet && <div className="mt-0.5 line-clamp-2 text-xs text-slate-500">{p.snippet}</div>}
+                  {p.snippet && <div className="mt-1 text-[11px] text-slate-500 leading-normal max-w-2xl">{p.snippet}</div>}
                 </div>
               </div>
             ))}
