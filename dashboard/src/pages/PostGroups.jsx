@@ -35,6 +35,7 @@ export default function PostGroups() {
   const [bg, setBg] = useState('')            // text_format_preset_id ('' = không nền)
   const [useAi, setUseAi] = useState(false)
   const [sel, setSel] = useState(() => new Set(s?.cfg?.groupIds || []))
+  const [gFilter, setGFilter] = useState('')
   const [randomize, setRandomize] = useState(true)
   const [stopOnError, setStopOnError] = useState(false)
   const [dMin, setDMin] = useState(s?.cfg?.minDelaySec ?? 45)
@@ -62,6 +63,8 @@ export default function PostGroups() {
   const preview = spin(variants[0] || content)
   const bgDisabled = images.length > 0 || !!link.trim()
   const activeBg = !bgDisabled ? BG_PRESETS.find(b => b.id === bg) : null
+  const shownPool = gFilter.trim() ? pool.filter(g => (g.name || '').toLowerCase().includes(gFilter.trim().toLowerCase())) : pool
+  const allShownSelected = shownPool.length > 0 && shownPool.every(g => sel.has(g.id))
 
   const toggle = (id) => setSel(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
   const onFiles = (e) => {
@@ -239,18 +242,25 @@ export default function PostGroups() {
         <Card className="flex flex-col p-0">
           <div className="flex items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
             <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-100">
-              <input type="checkbox" checked={pool.length > 0 && pool.every(g => sel.has(g.id))} disabled={!pool.length}
-                onChange={() => setSel(pool.length && pool.every(g => sel.has(g.id)) ? new Set() : new Set(pool.map(g => g.id)))}
+              <input type="checkbox" checked={allShownSelected} disabled={!shownPool.length}
+                onChange={() => setSel(prev => { const n = new Set(prev); if (allShownSelected) shownPool.forEach(g => n.delete(g.id)); else shownPool.forEach(g => n.add(g.id)); return n })}
                 className="h-4 w-4 accent-indigo-500" />
               <IconTarget size={15} className="text-indigo-400" /> Chọn nhóm ({sel.size})
             </label>
             <Btn size="sm" variant="ghost" onClick={() => setSel(new Set(s.cfg?.groupIds || []))} disabled={!(s.cfg?.groupIds || []).length}>Theo mục tiêu</Btn>
           </div>
+          {pool.length > 0 && (
+            <div className="border-b border-slate-800 px-3 py-2">
+              <Input value={gFilter} onChange={e => setGFilter(e.target.value)} placeholder={`Lọc theo từ khóa… (${shownPool.length}/${pool.length} nhóm)`} />
+            </div>
+          )}
           {pool.length === 0 ? (
             <Empty icon={IconTarget}>Chưa có nhóm. Sang <b>Nhóm của tôi</b> để quét, hoặc <b>Tham gia nhóm</b> để tìm + vào nhóm.</Empty>
+          ) : shownPool.length === 0 ? (
+            <Empty icon={IconTarget}>Không có nhóm khớp "<b>{gFilter}</b>".</Empty>
           ) : (
             <div className="max-h-[30rem] divide-y divide-slate-800 overflow-y-auto">
-              {pool.map(g => (
+              {shownPool.map(g => (
                 <div key={g.id} onClick={() => toggle(g.id)}
                   className={`flex cursor-pointer items-center gap-3 p-2.5 hover:bg-slate-800/40 ${sel.has(g.id) ? 'bg-indigo-500/10' : ''}`}>
                   <input type="checkbox" checked={sel.has(g.id)} readOnly className="pointer-events-none h-4 w-4 shrink-0 accent-indigo-500" />
