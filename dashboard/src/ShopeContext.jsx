@@ -17,6 +17,7 @@ export function ShopeProvider({ children }) {
   const [account, setAccount] = useState(null)   // tài khoản web (từ /api/me)
   const triedConnect = useRef(false)
   const restoredGroups = useRef(false)
+  const failCount = useRef(0)
 
   const notify = useCallback((color, message) => {
     const id = ++_toastSeq
@@ -26,7 +27,12 @@ export function ShopeProvider({ children }) {
 
   const refresh = useCallback(async () => {
     let r = await ext({ type: 'GET_STATE' })
-    if (!r?.ok) { setConnected(false); return }
+    if (!r?.ok) {
+      failCount.current++
+      if (failCount.current >= 3) setConnected(false)
+      return
+    }
+    failCount.current = 0
 
     // Extension trống dữ liệu (vd vừa cài lại extension) nhưng web localStorage có bản sao
     // → đẩy bản sao trở lại extension MỘT lần để khôi phục nguồn dữ liệu.

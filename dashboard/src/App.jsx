@@ -110,8 +110,7 @@ function StatusChip({ ok, icon: Icon, label, title, onClick }) {
       <Icon size={14} className="shrink-0" />
       <span className="hidden sm:inline">{label}</span>
       <span className="relative flex h-1.5 w-1.5 shrink-0">
-        {ok && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
-        <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
+        <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${ok ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
       </span>
     </button>
   )
