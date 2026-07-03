@@ -80,7 +80,8 @@ export default function CommentPages({ goto }) {
   const bulkPost = () => post(queue.filter(q => sel.has(q.postId)).map(q => q.postId), (id) => setSel(p => { const n = new Set(p); n.delete(id); return n }))
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col xl:flex-row gap-6 items-start">
+      <div className="flex-1 min-w-0 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-900/65 pb-4">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight">Vận hành Comment Fanpage</h1>
@@ -247,12 +248,10 @@ export default function CommentPages({ goto }) {
         </div>
       )}
 
-      {/* Step 3: Fetch posts & Run */}
+      {/* Step 3: Hàng chờ (Vận hành) */}
       {step === 2 && (
-        <div className="flex flex-col xl:flex-row gap-6 animate-fadeIn items-start">
-          <div className="flex-1 min-w-0 space-y-6">
-          {/* Controls */}
-          <Card className="p-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="animate-fadeIn space-y-6">
+          <Card className="p-5 flex flex-col justify-between space-y-4">
             <div>
               <h3 className="font-bold text-slate-205 text-sm">Cào bài viết từ Page mục tiêu</h3>
               <p className="text-xs text-slate-400 mt-0.5">Lấy các bài đăng mới nhất từ {nPages} Page mục tiêu để bắt đầu rải comment.</p>
@@ -338,15 +337,16 @@ export default function CommentPages({ goto }) {
               )}
             </div>
           </Card>
-          </div>
-          {/* Logs Panel (Right Side) */}
-          <div className="w-full xl:w-96 shrink-0 xl:sticky xl:top-6">
-            <ProgressPanel results={results} posting={posting} pstat={pstat}>
-              <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
-            </ProgressPanel>
-          </div>
         </div>
       )}
+      </div>
+
+      {/* Logs Panel (Right Side) */}
+      <div className="w-full xl:w-96 shrink-0 xl:sticky xl:top-6">
+        <ProgressPanel results={results} posting={posting} pstat={pstat}>
+          <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
+        </ProgressPanel>
+      </div>
     </div>
   )
 }

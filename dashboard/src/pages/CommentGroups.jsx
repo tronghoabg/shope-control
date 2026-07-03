@@ -137,7 +137,8 @@ export default function CommentGroups() {
   const bulkPost = () => post(queue.filter(q => sel.has(q.postId)).map(q => q.postId), (id) => setSel(p => { const n = new Set(p); n.delete(id); return n }))
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col xl:flex-row gap-6 items-start">
+      <div className="flex-1 min-w-0 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-900/65 pb-4">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight">Vận hành Comment Nhóm</h1>
@@ -396,9 +397,8 @@ export default function CommentGroups() {
 
       {/* Step 3: Run & Approve */}
       {step === 2 && (
-        <div className="flex flex-col xl:flex-row gap-6 animate-fadeIn items-start">
-          <div className="flex-1 min-w-0 space-y-6">
-            {/* Controls deck */}
+        <div className="animate-fadeIn space-y-6">
+          {/* Controls deck */}
           <div className="grid gap-5 md:grid-cols-3">
             <Card className="p-5 flex flex-col justify-between md:col-span-2 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -494,17 +494,16 @@ export default function CommentGroups() {
               )}
             </div>
           </Card>
-
-          </div>
-
-          {/* Logs Panel (Right Side) */}
-          <div className="w-full xl:w-96 shrink-0 xl:sticky xl:top-6">
-            <ProgressPanel results={results} posting={posting} pstat={pstat}>
-              <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
-            </ProgressPanel>
-          </div>
         </div>
       )}
+      </div>
+
+      {/* Logs Panel (Right Side) */}
+      <div className="w-full xl:w-96 shrink-0 xl:sticky xl:top-6">
+        <ProgressPanel results={results} posting={posting} pstat={pstat}>
+          <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
+        </ProgressPanel>
+      </div>
     </div>
   )
 }
