@@ -122,7 +122,24 @@ function StatusChip({ ok, icon: Icon, label, title, onClick }) {
 
 export default function App() {
   const { s, connected, aiReady, connectFb, account } = useShope()
-  const [page, setPage] = useState('overview')
+  const [page, setPage] = useState(() => {
+    const hash = window.location.hash.replace('#', '')
+    return NAV_BY_KEY[hash] ? hash : 'overview'
+  })
+
+  useEffect(() => {
+    window.location.hash = page
+  }, [page])
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const hash = window.location.hash.replace('#', '')
+      if (NAV_BY_KEY[hash]) setPage(hash)
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
+
   const [showLogs, setShowLogs] = useState(false)   // log đã nhúng trong từng trang comment; panel phải chỉ bật khi cần
   const conn = s?.conn
   const shopee = s?.shopee
