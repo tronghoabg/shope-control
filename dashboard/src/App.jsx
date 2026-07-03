@@ -4,6 +4,7 @@ import {
   IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink, IconUserCircle, IconCrown, IconSend, IconBookmark, IconHelp, IconLogout, IconShieldLock, IconBuildingStore, IconTestPipe,
 } from '@tabler/icons-react'
 
+console.log('Cache buster', Date.now());
 const PLAN_NAME = { free: 'Miễn phí', basic: 'Cơ bản', pro: 'Chuyên', business: 'Đại lý' }
 
 function AccountBox({ account, onManage }) {
