@@ -7,6 +7,7 @@ import {
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
 import { Btn, Badge, Field, Input, Textarea, Toggle, Card, Empty } from '../ui.jsx'
+import { LogFeed } from '../LogPanel.jsx'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const MIN_DELAY = 90   // an toàn checkpoint: không cho nhanh hơn 90s
@@ -192,7 +193,8 @@ export default function Queue() {
   const kindDesc = KINDS.find(k => k.k === kind)?.d
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col xl:flex-row gap-6 items-start">
+      <div className="flex-1 min-w-0 space-y-4">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-bold text-slate-100">Comment dạo / Rải link</h1>
@@ -410,6 +412,21 @@ export default function Queue() {
             : <div className="grid gap-3 xl:grid-cols-2">{queue.map(it => <QueueItem key={it.postId} it={it} onAct={act} selected={sel.has(it.postId)} onSel={toggleSel} />)}</div>}
         </div>
       </Card>
+      </div>
+
+      {/* Logs Panel (Right Side) */}
+      <div className="w-full xl:w-96 shrink-0 xl:sticky xl:top-6">
+        <Card className="p-0 flex flex-col xl:h-[calc(100vh-8rem)] border-slate-800 bg-slate-950/40">
+          <div className="flex items-center gap-2 border-b border-slate-850 px-4 py-3 text-sm font-semibold text-slate-200 shrink-0">
+            <IconHistory size={16} className="text-indigo-400" />
+            <span>Nhật ký hệ thống</span>
+            <button onClick={() => call({ type: 'CLEAR_LOGS' })} className="ml-auto text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-slate-300 transition-colors">Xóa</button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+            <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
+          </div>
+        </Card>
+      </div>
     </div>
   )
 }

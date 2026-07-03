@@ -141,7 +141,6 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
-  const [showLogs, setShowLogs] = useState(false)   // log đã nhúng trong từng trang comment; panel phải chỉ bật khi cần
   const conn = s?.conn
   const shopee = s?.shopee
   const queueCount = s?.queue?.length ?? 0
@@ -222,12 +221,6 @@ export default function App() {
 
         {/* Phải: tài khoản Facebook (avatar FB) */}
         <div className="flex items-center justify-end gap-3">
-          {!showLogs && (
-            <button onClick={() => setShowLogs(true)} title="Hiện nhật ký"
-              className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors">
-              <IconHistory size={16} />
-            </button>
-          )}
           {conn?.connected ? (
             <div title={`Facebook: ${conn.name || conn.id}`}
               className="flex items-center gap-2 rounded-full border border-slate-800/80 bg-slate-900/30 py-1 pl-1 pr-3">
@@ -307,7 +300,6 @@ export default function App() {
                 {NAV.find(n => n.key === page)?.render(setPage)}
               </div>
             </main>
-            {showLogs && <LogPanel onClose={() => setShowLogs(false)} />}
           </div>
 
           {/* ── FOOTER ── */}

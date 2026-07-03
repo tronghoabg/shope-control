@@ -357,34 +357,33 @@ export default function PostGroups() {
               </div>
             )}
           </Card>
+          {/* Progress logs */}
+          {results.length > 0 && (
+            <Card className="p-5 space-y-4 border-indigo-500/20 bg-indigo-500/[0.02]">
+              <div className="flex flex-wrap items-center justify-between text-sm gap-2">
+                <span className="font-bold text-slate-200">Tiến trình đăng bài ({done} / {results.length} nhóm)</span>
+                <span className="text-xs font-semibold text-slate-405 font-mono">{running ? (wait ? `Đang nghỉ trễ ${wait} giây…` : 'Đang xử lý đăng…') : 'Đã hoàn thành'}</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-900 border border-slate-850">
+                <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-300 animate-pulse" style={{ width: `${pct}%` }} />
+              </div>
+              <div className="max-h-60 overflow-y-auto custom-scrollbar divide-y divide-slate-850/60 rounded-xl border border-slate-850/60 bg-slate-950/40">
+                {results.map(r => (
+                  <div key={r.id} className="flex items-center gap-3 px-4 py-2.5 text-xs font-semibold transition-colors hover:bg-slate-900/40">
+                    {r.status === 'success' ? <IconCheck size={14} className="shrink-0 text-emerald-400 bg-emerald-500/10 p-0.5 rounded-full" />
+                      : r.status === 'error' ? <IconX size={14} className="shrink-0 text-red-400 bg-red-500/10 p-0.5 rounded-full" />
+                      : r.status === 'posting' ? <IconRefresh size={14} className="shrink-0 animate-spin text-indigo-400" />
+                      : <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-slate-700/50" />}
+                    <span className="min-w-0 flex-1 truncate text-slate-300">{r.name}</span>
+                    {r.status === 'success' && r.url && <a href={r.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-bold text-indigo-400 hover:underline inline-flex items-center gap-1">Xem <IconExternalLink size={11} /></a>}
+                    {r.status === 'error' && <span className="shrink-0 max-w-[40%] truncate font-mono text-[10px] text-red-400/80">{r.error}</span>}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
         </div>
       </div>
-
-      {/* Progress logs */}
-      {results.length > 0 && (
-        <Card className="p-5 space-y-4">
-          <div className="flex flex-wrap items-center justify-between text-sm gap-2">
-            <span className="font-bold text-slate-200">Tiến trình đăng bài ({done} / {results.length} nhóm)</span>
-            <span className="text-xs font-semibold text-slate-405 font-mono">{running ? (wait ? `Đang nghỉ trễ ${wait} giây…` : 'Đang xử lý đăng…') : 'Đã hoàn thành'}</span>
-          </div>
-          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-900 border border-slate-850">
-            <div className="h-full rounded-full bg-gradient-to-r from-indigo-650 to-violet-500 transition-all duration-300 animate-pulse" style={{ width: `${pct}%` }} />
-          </div>
-          <div className="max-h-60 overflow-y-auto divide-y divide-slate-850 rounded-xl border border-slate-850/60 bg-slate-950/10">
-            {results.map(r => (
-              <div key={r.id} className="flex items-center gap-3 px-4 py-2.5 text-xs font-semibold transition-colors hover:bg-slate-900/10">
-                {r.status === 'success' ? <IconCheck size={14} className="shrink-0 text-emerald-400 bg-emerald-500/10 p-0.5 rounded-full" />
-                  : r.status === 'error' ? <IconX size={14} className="shrink-0 text-red-400 bg-red-500/10 p-0.5 rounded-full" />
-                  : r.status === 'posting' ? <IconRefresh size={14} className="shrink-0 animate-spin text-indigo-400" />
-                  : <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-slate-700" />}
-                <span className="min-w-0 flex-1 truncate text-slate-300">{r.name}</span>
-                {r.status === 'success' && r.url && <a href={r.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-bold text-indigo-400 hover:underline inline-flex items-center gap-1">Xem bài <IconExternalLink size={11} /></a>}
-                {r.status === 'error' && <span className="shrink-0 max-w-[40%] truncate font-mono text-[11px] text-red-400">{r.error}</span>}
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
     </div>
   )
 }
