@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ToolMKT AI — Tìm khách hàng trên Facebook",
-  "version": "1.0.0",
+  "version": "1.1",
   "description": "Trợ lý AI giúp tìm và phân tích bài đăng, nhóm Facebook có khách hàng tiềm năng; gợi ý nội dung tương tác phù hợp.",
   "icons": {
     "16": "icons/icon16.png",
