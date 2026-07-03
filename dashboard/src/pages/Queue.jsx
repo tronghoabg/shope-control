@@ -29,6 +29,7 @@ function QueueItem({ it, onAct, selected, onSel }) {
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <input type="checkbox" checked={selected} onChange={() => onSel(it.postId)} className="h-4 w-4 accent-indigo-500" />
         {it.isPage ? <Badge color="blue">Page{it.pageName ? `: ${it.pageName}` : ''}</Badge> : <Badge color="yellow">điểm {it.score}</Badge>}
+        {it.groupName && <Badge color="gray" className="max-w-[150px] truncate" title={it.groupName}>{it.groupName}</Badge>}
         {it.productName && <Badge color="blue">{it.productName}</Badge>}
         {it.link && <Badge color="indigo">có link</Badge>}
         {it.permalink && <a href={it.permalink} target="_blank" rel="noreferrer" className="ml-auto inline-flex items-center gap-1 text-xs text-indigo-400 hover:underline"><IconExternalLink size={13} /> xem bài</a>}
@@ -65,7 +66,11 @@ export default function Queue() {
   if (!s || !cfgL) return <p className="text-slate-500">Đang tải…</p>
 
   const cfg = s.cfg
-  const queue = s.queue || []
+  const queue = (s.queue || []).map(q => {
+    if (q.groupName || q.isPage) return q
+    const g = s.discoveredGroups?.find(x => x.groupId === q.groupId) || s.searchResults?.find(x => x.groupId === q.groupId)
+    return { ...q, groupName: g ? g.name : q.groupId }
+  })
   const mode = cfg.mode || 'affiliate'
   const source = cfg.productSource || 'catalog'
   const kind = mode === 'social' ? 'social' : (source === 'shopee' ? 'shopee' : 'catalog')

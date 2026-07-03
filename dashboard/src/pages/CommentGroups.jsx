@@ -55,7 +55,11 @@ export default function CommentGroups() {
   if (!s || !cfgL) return <p className="text-slate-500">Đang tải cấu hình chiến dịch…</p>
 
   const cfg = s.cfg
-  const queue = (s.queue || []).filter(q => !q.isPage)
+  const queue = (s.queue || []).filter(q => !q.isPage).map(q => {
+    if (q.groupName) return q
+    const g = pool.find(x => x.id === q.groupId)
+    return { ...q, groupName: g ? g.name : q.groupId }
+  })
   const mode = cfg.mode || 'affiliate'
   const source = cfg.productSource || 'catalog'
   const kind = mode === 'social' ? 'social' : (source === 'shopee' ? 'shopee' : 'catalog')
