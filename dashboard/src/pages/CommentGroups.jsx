@@ -65,7 +65,7 @@ export default function CommentGroups() {
     const minD = Math.max(MIN_DELAY, cfgL.minDelaySec || MIN_DELAY)
     const maxD = Math.max(minD, cfgL.maxDelaySec || minD)
     setLocal({ ...cfgL, minDelaySec: minD, maxDelaySec: maxD })
-    setCfg({ dailyCap: cfgL.dailyCap, minDelaySec: minD, maxDelaySec: maxD, minScore: cfgL.minScore, postsPerScan: cfgL.postsPerScan, requireApproval: cfgL.requireApproval, subId: cfgL.subId })
+    setCfg({ dailyCap: cfgL.dailyCap, minDelaySec: minD, maxDelaySec: maxD, minScore: cfgL.minScore, postsPerScan: cfgL.postsPerScan, requireApproval: cfgL.requireApproval, subId: cfgL.subId, requiredKeywords: cfgL.requiredKeywords, bannedKeywords: cfgL.bannedKeywords })
     notify('green', 'Đã lưu cấu hình thành công')
   }
   
@@ -239,6 +239,24 @@ export default function CommentGroups() {
               <Field label="Delay max (giây)"><Input type="number" min={MIN_DELAY} value={cfgL.maxDelaySec} onChange={setNum('maxDelaySec')} /></Field>
               <Field label="Ngưỡng điểm bài tiềm năng"><Input type="number" min={0} value={cfgL.minScore} onChange={setNum('minScore')} /></Field>
               <Field label="Quét bài/nhóm"><Input type="number" min={1} value={cfgL.postsPerScan} onChange={setNum('postsPerScan')} /></Field>
+            </div>
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 mt-4">
+              <Field label="Từ khóa bắt buộc có" hint="Chỉ chọn bài viết có chứa các từ này (phân cách bằng dấu phẩy). Trống = không lọc.">
+                <Textarea 
+                  rows={2} 
+                  value={cfgL.requiredKeywords || ''} 
+                  onChange={e => setLocal({ ...cfgL, requiredKeywords: e.target.value })}
+                  placeholder="Vd: cần mua, tư vấn, tool, phần mềm" 
+                />
+              </Field>
+              <Field label="Từ khóa cấm (Spam filter)" hint="Bỏ qua ngay lập tức bài viết chứa các từ này (phân cách bằng dấu phẩy).">
+                <Textarea 
+                  rows={2} 
+                  value={cfgL.bannedKeywords || ''} 
+                  onChange={e => setLocal({ ...cfgL, bannedKeywords: e.target.value })}
+                  placeholder="Vd: bán via, inbox, clone" 
+                />
+              </Field>
             </div>
 
             <div className="flex flex-wrap items-center justify-between border-t border-slate-850 pt-4 gap-4">

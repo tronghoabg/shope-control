@@ -732,6 +732,21 @@ async function makeAffiliateLink(originalLink, subIds) {
   return r || { ok: false, error: 'no_result' };
 }
 
+// Kiểm tra từ khóa (dùng cho Required/Banned Keywords)
+function checkKeywords(text, requiredStr, bannedStr) {
+  const pText = String(text || '').toLowerCase();
+  if (bannedStr && bannedStr.trim()) {
+    const banned = bannedStr.split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+    const match = banned.find(k => pText.includes(k));
+    if (match) return { ok: false, reason: 'banned', match };
+  }
+  if (requiredStr && requiredStr.trim()) {
+    const required = requiredStr.split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+    if (required.length > 0 && !required.some(k => pText.includes(k))) return { ok: false, reason: 'missing_required' };
+  }
+  return { ok: true };
+}
+
 // ─── Nạp thêm việc vào hàng đợi: quét feed 1 nhóm → classify → suggest ────────
 async function refillQueue(opts = {}) {
   const { cfg, state, commentedPosts, catalog, discoveredGroups, searchResults } = await getCfg();
@@ -760,8 +775,17 @@ async function refillQueue(opts = {}) {
     _pi++;
     await setProgress({ label: `${gName}: bài ${_pi}/${posts.length} · phân loại…` });
     if (commentedPosts[post.postId]) continue; // đã comment rồi
-    // 1) bài có tiềm năng không (theo mode)
     const ex = String(post.text).replace(/\s+/g, ' ').slice(0, 45);
+    
+    // 0) Lọc từ khóa
+    const kwCheck = checkKeywords(post.text, cfg.requiredKeywords, cfg.bannedKeywords);
+    if (!kwCheck.ok) {
+      const msg = kwCheck.reason === 'banned' ? `✕ bỏ qua (từ khóa cấm: "${kwCheck.match}")` : `✕ bỏ qua (thiếu từ khóa bắt buộc)`;
+      await pushLog('info', `${msg}: "${ex}…"`, { group: groupId, kind: 'post' });
+      continue;
+    }
+
+    // 1) bài có tiềm năng không (theo mode)
     const cls = await self.ShopeAI.classifyPost(cfg, post.text, groupId, cfg.mode);
     if (!cls.potential || (cls.score || 0) < cfg.minScore) {
       await pushLog('info', `✕ bỏ qua (${cls.score || 0}đ): "${ex}…"`, { group: groupId, kind: 'post' });
@@ -1118,6 +1142,14 @@ async function scanPagesOnce() {
     for (const post of (feed.posts || [])) {
       if (commentedPosts[post.postId] || newQueue.some(q => q.postId === post.postId)) continue;
       const ex = String(post.text).replace(/\s+/g, ' ').slice(0, 45);
+      
+      const kwCheck = checkKeywords(post.text, cfg.requiredKeywords, cfg.bannedKeywords);
+      if (!kwCheck.ok) {
+        const msg = kwCheck.reason === 'banned' ? `✕ bỏ qua (từ khóa cấm: "${kwCheck.match}")` : `✕ bỏ qua (thiếu từ khóa bắt buộc)`;
+        await pushLog('info', `${msg}: "${ex}…"`, { group: page.pageId, kind: 'post' });
+        continue;
+      }
+
       let cls;
       try { cls = await self.ShopeAI.classifyPost(cfg, post.text, page.name, 'social'); }
       catch (e) { if (e?.code && HARD_AI_ERRORS.has(e.code)) throw e; continue; }
