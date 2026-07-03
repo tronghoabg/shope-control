@@ -21,7 +21,7 @@ function fmtMembers(n) {
 }
 
 export default function Discover() {
-  const { s, aiReady, call, notify, refresh } = useShope()
+  const { s, aiReady, call, notify, account, refresh } = useShope()
   const [keyword, setKeyword] = useState('')
   const [suggested, setSuggested] = useState([])
   const [suggesting, setSuggesting] = useState(false)
@@ -117,7 +117,10 @@ export default function Discover() {
       )}
 
       <Section title="Khám phá hội nhóm theo chủ đề"
-        right={<Btn variant="ghost" icon={IconSparkles} loading={suggesting} disabled={!aiReady} className="text-amber-400 hover:bg-amber-500/10 border border-amber-500/20">AI gợi ý từ khóa</Btn>}>
+        right={<Btn variant="ghost" icon={IconSparkles} loading={suggesting} className="text-amber-400 hover:bg-amber-500/10 border border-amber-500/20" onClick={() => {
+          if (!account?.loggedIn) return notify('red', 'Vui lòng đăng nhập tài khoản hệ thống để sử dụng AI gợi ý')
+          suggest()
+        }}>AI gợi ý từ khóa</Btn>}>
         <div className="flex gap-2.5">
           <Input placeholder="Nhập các chủ đề cách nhau bởi dấu phẩy (vd: phụ kiện điện thoại, đồ gia dụng…)" value={keyword}
             onChange={(e) => setKeyword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search()} />

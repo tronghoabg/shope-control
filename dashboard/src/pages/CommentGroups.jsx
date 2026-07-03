@@ -121,8 +121,8 @@ export default function CommentGroups() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-900/65 pb-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight">Vận hành rải link nhóm</h1>
-          <p className="text-sm text-slate-400">Thiết lập cấu hình, khoanh vùng mục tiêu và kích hoạt AI rải bài viết/comment.</p>
+          <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight">Vận hành Comment Nhóm</h1>
+          <p className="text-sm text-slate-400">Thiết lập cấu hình, khoanh vùng mục tiêu và kích hoạt AI bình luận tự động.</p>
         </div>
         <div className="flex items-center gap-3">
           <Badge color="gray">{s.state.doneToday || 0}/{cfg.dailyCap} đã chạy hôm nay</Badge>
@@ -361,8 +361,13 @@ export default function CommentGroups() {
                 </div>
                 <div>
                   {scanning
-                    ? <Btn variant="danger" icon={IconPlayerStop} onClick={() => { ext({ type: 'CANCEL_RUN' }); notify('blue', 'Đang dừng…') }}>Dừng quét bài</Btn>
-                    : <Btn variant="primary" icon={IconRadar} disabled={!nGroups || posting} onClick={start}>Tìm bài tiềm năng</Btn>}
+                  ? <Btn variant="danger" icon={IconPlayerStop} onClick={() => call({ type: 'CANCEL_RUN' }, { okMsg: 'Đang dừng quét…' })}>Dừng tìm kiếm</Btn>
+                  : <Btn variant="primary" icon={IconTarget} disabled={!nGroups} onClick={() => {
+                      if (!account?.loggedIn) return notify('red', 'Vui lòng đăng nhập tài khoản hệ thống để sử dụng tính năng này')
+                      start()
+                    }}>
+                      Tìm bài tiềm năng ngay lập tức
+                    </Btn>}
                 </div>
               </div>
 

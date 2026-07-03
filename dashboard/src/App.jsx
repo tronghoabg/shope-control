@@ -75,8 +75,8 @@ import Guide from './pages/Guide.jsx'
 const NAV = [
   { key: 'overview', label: 'Tổng quan', icon: IconLayoutDashboard, render: (goto) => <Overview goto={goto} /> },
   // VẬN HÀNH CHIẾN DỊCH
-  { key: 'cmtgroups', label: 'Rải link Nhóm', icon: IconUsersGroup, render: () => <CommentGroups /> },
-  { key: 'cmtpages', label: 'Rải link Fanpage', icon: IconBuildingStore, render: (goto) => <CommentPages goto={goto} /> },
+  { key: 'cmtgroups', label: 'Comment Nhóm', icon: IconUsersGroup, render: () => <CommentGroups /> },
+  { key: 'cmtpages', label: 'Comment Fanpage', icon: IconBuildingStore, render: (goto) => <CommentPages goto={goto} /> },
   { key: 'postgroups', label: 'Đăng bài tự động', icon: IconSend, render: () => <PostGroups /> },
   // MỤC TIÊU & NGUỒN LỰC
   { key: 'discover', label: 'Tìm kiếm Nhóm', icon: IconCompass, render: () => <Discover /> },

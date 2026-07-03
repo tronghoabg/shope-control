@@ -8,7 +8,7 @@ const scoreColor = (s) => s == null ? 'gray' : s >= 70 ? 'green' : s >= 40 ? 'ye
 const FILTERS = [{ k: 'all', l: 'Tất cả' }, { k: 'potential', l: 'Tiềm năng (≥70đ)' }, { k: 'weak', l: 'Kém (<40đ)' }]
 
 export default function Groups() {
-  const { s, aiReady, call, notify } = useShope()
+  const { s, aiReady, call, notify, account } = useShope()
   const [scanning, setScanning] = useState(false)
   const [filter, setFilter] = useState('all')
   if (!s) return <p className="text-slate-500">Đang tải danh sách nhóm…</p>
@@ -52,7 +52,10 @@ export default function Groups() {
         <div>
           {scanning
             ? <Btn variant="danger" icon={IconPlayerStop} onClick={() => { ext({ type: 'CANCEL_RUN' }); notify('blue', 'Đang dừng…') }}>Dừng quét</Btn>
-            : <Btn variant="primary" icon={IconRadar2} disabled={!aiReady} onClick={scan}>Quét &amp; Chấm Điểm AI</Btn>}
+            : <Btn variant="primary" icon={IconRadar2} onClick={() => {
+                if (!account?.loggedIn) return notify('red', 'Vui lòng đăng nhập tài khoản hệ thống để sử dụng AI chấm điểm')
+                scan()
+              }}>Quét &amp; Chấm Điểm AI</Btn>}
         </div>
       </div>
 

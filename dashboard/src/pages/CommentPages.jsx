@@ -83,8 +83,8 @@ export default function CommentPages({ goto }) {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-900/65 pb-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight">Vận hành rải link Fanpage</h1>
-          <p className="text-sm text-slate-400">Chọn Page mục tiêu, cào bài viết mới nhất và soạn comment phản hồi rải link.</p>
+          <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight">Vận hành Comment Fanpage</h1>
+          <p className="text-sm text-slate-400">Chọn Page mục tiêu, cào bài viết mới nhất và soạn bình luận tự động.</p>
         </div>
         <div className="flex items-center gap-3">
           <Badge color="gray">{s.state.doneToday || 0}/{cfg.dailyCap} đã chạy hôm nay</Badge>
