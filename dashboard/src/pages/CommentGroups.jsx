@@ -46,6 +46,12 @@ export default function CommentGroups() {
     }
   }, [targets.length, cfgL])
 
+  const filteredPool = useMemo(() => {
+    if (!searchQuery.trim()) return pool
+    const q = searchQuery.toLowerCase()
+    return pool.filter(g => (g.name || '').toLowerCase().includes(q) || (g.id || '').toLowerCase().includes(q))
+  }, [pool, searchQuery])
+
   if (!s || !cfgL) return <p className="text-slate-500">Đang tải cấu hình chiến dịch…</p>
 
   const cfg = s.cfg
@@ -95,12 +101,6 @@ export default function CommentGroups() {
   const saveTargets = (ids) => call({ type: 'SET_TARGETS', groupIds: [...new Set(ids)] })
   const toggleTarget = (id) => saveTargets(targetSet.has(id) ? targets.filter(x => x !== id) : [...targets, id])
   const applyList = (l) => call({ type: 'SET_TARGETS', groupIds: l.groupIds }, { okMsg: `Đã chọn "${l.name}" (${l.groupIds.length} nhóm)` })
-  
-  const filteredPool = useMemo(() => {
-    if (!searchQuery.trim()) return pool
-    const q = searchQuery.toLowerCase()
-    return pool.filter(g => (g.name || '').toLowerCase().includes(q) || (g.id || '').toLowerCase().includes(q))
-  }, [pool, searchQuery])
 
   const allSel = filteredPool.length > 0 && filteredPool.every(g => targetSet.has(g.id))
   const toggleAllPool = () => {
