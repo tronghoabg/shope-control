@@ -214,7 +214,7 @@ export default function App() {
               ToolMKT AI
             </div>
             <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-              Hệ thống rải link tự động
+              Hệ thống Marketing trên Facebook
             </div>
           </div>
         </a>
