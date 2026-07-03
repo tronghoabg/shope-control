@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import {
   IconDeviceFloppy, IconSend, IconTrash, IconExternalLink, IconListCheck, IconRadar,
   IconChevronDown, IconBookmark, IconPlayerPlay, IconPlayerStop, IconHandStop, IconUsersGroup, IconSettings, IconBolt,
-  IconBuildingStore, IconDownload,
+  IconBuildingStore, IconDownload, IconPhoto, IconX,
 } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
@@ -83,6 +83,22 @@ export default function Queue() {
     if ((cfgL.minDelaySec || 0) < MIN_DELAY) notify('blue', `Delay tối thiểu 90s (an toàn) — đã đặt về ${minD}s`)
   }
   const act = (type, postId, extra, timeout) => call({ type, postId, ...(extra || {}) }, { timeout })
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) return notify('red', 'Vui lòng chọn file ảnh hợp lệ')
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      setLocal({ ...cfgL, commentImageBase64: ev.target.result })
+      setCfg({ commentImageBase64: ev.target.result })
+    }
+    reader.readAsDataURL(file)
+  }
+  const removeImage = () => {
+    setLocal({ ...cfgL, commentImageBase64: null })
+    setCfg({ commentImageBase64: null })
+  }
 
   // ── NHÓM mục tiêu (AI tự tìm bài tiềm năng) ──
   const targets = cfg.groupIds || []
@@ -216,6 +232,25 @@ export default function Queue() {
               onBlur={() => setCfg({ seedContent: cfgL.seedContent || '' })}
               placeholder={'Ví dụ: Bên em chuyên sỉ/lẻ cây cảnh mini giá tốt, ai cần ib em tư vấn nhé. Zalo 09xxx.\n\nĐể trống = AI tự soạn comment hợp từng bài.'} />
             <p className="mt-1 text-xs text-slate-500">Có nội dung → AI biến tấu lời mời của bạn cho từng bài. Để trống → AI bình luận tự nhiên theo nội dung bài.</p>
+            
+            <div className="mt-4 border-t border-slate-800 pt-3">
+              <div className="mb-2 text-sm font-medium text-slate-200 flex items-center justify-between">
+                <span>Ảnh đính kèm <span className="text-xs font-normal text-slate-500">(sẽ đính kèm ảnh này vào mọi comment dạo)</span></span>
+              </div>
+              {cfgL.commentImageBase64 ? (
+                <div className="relative inline-block group">
+                  <img src={cfgL.commentImageBase64} alt="Đính kèm" className="h-24 w-auto rounded-lg border border-slate-700 object-cover" />
+                  <button onClick={removeImage} title="Xóa ảnh" className="absolute -top-2 -right-2 rounded-full bg-red-500 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100 shadow-lg">
+                    <IconX size={14} stroke={3} />
+                  </button>
+                </div>
+              ) : (
+                <label className="flex w-fit cursor-pointer items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-300 hover:border-indigo-500 hover:text-indigo-400 transition-colors">
+                  <IconPhoto size={16} /> Chọn ảnh đính kèm
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                </label>
+              )}
+            </div>
           </div>
         )}
 

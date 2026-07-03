@@ -413,6 +413,44 @@ async function runFetchInFbTab(url, method, body, headers) {
   throw new Error('tab_fetch_failed');
 }
 
+// ─── Upload Ảnh vào tab FB thật (cho comment dạo đính kèm) ──────────────
+async function runUploadInFbTab(url, fields, fileInfo) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const tabId = await getFbTab();
+    try {
+      const res = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: async (url, fields, fileInfo) => {
+          const byteCharacters = atob(fileInfo.base64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: fileInfo.mime });
+          
+          const fd = new FormData();
+          for (const k in fields) fd.append(k, fields[k]);
+          fd.append('file', blob, fileInfo.name);
+          
+          const req = await fetch(url, { method: 'POST', body: fd, credentials: 'omit' });
+          return await req.text();
+        },
+        args: [url, fields, fileInfo]
+      });
+      return res[0].result;
+    } catch (e) {
+      const msg = String(e?.message || e);
+      if (attempt === 0 && /No tab with id|No frame|Frame with ID|No window|cannot be scripted/i.test(msg)) {
+        await chrome.storage.session.remove('fbTabId');
+        await new Promise(r => setTimeout(r, 500));
+        continue;
+      }
+      throw new Error('Upload ảnh tab lỗi: ' + msg);
+    }
+  }
+}
+
 // URL có phải shopee.vn script được không?
 function isShopeeUrl(url) {
   return /^https:\/\/shopee\.vn\//.test(url || '');
@@ -844,6 +882,15 @@ async function commitComment(item) {
   const creds = await getCreds();
   let ok = false, error = '';
   try {
+    if (cfg.commentImageBase64) {
+      try {
+        await pushLog('info', `Đang tải ảnh đính kèm lên Facebook...`);
+        const photoId = await self.ShopeFbApi.fbUploadPhoto(runUploadInFbTab, creds, cfg.commentImageBase64);
+        item.attachmentId = photoId;
+      } catch (err) {
+        await pushLog('error', `Tải ảnh đính kèm thất bại, sẽ bỏ qua ảnh: ${err.message}`);
+      }
+    }
     const res = await self.ShopeFbApi.fbPostComment(runFetchInFbTab, creds, item, item.comment);
     commentedPosts[item.postId] = Date.now();
     if (res.ok) {

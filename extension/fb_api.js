@@ -293,7 +293,8 @@ async function fbPostComment(runFetch, creds, item, message) {
   const vars = {
     feedLocation: 'POST_PERMALINK_DIALOG', feedbackSource: 2, groupID: item.groupId || null,
     input: {
-      actor_id: creds.uid, client_mutation_id: rndId(), attachments: null,
+      actor_id: creds.uid, client_mutation_id: rndId(), 
+      attachments: item.attachmentId ? [{ media: { id: String(item.attachmentId) } }] : null,
       feedback_id: fbId, formatting_style: null,
       message: { ranges: [], text: message }, attribution_id_v2: ATTRIB,
       vod_video_timestamp: null, is_tracking_encrypted: true,
