@@ -229,7 +229,11 @@ export default function Queue() {
           <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
             <div className="mb-1.5 text-sm font-medium text-slate-200">Nội dung tìm khách <span className="text-xs font-normal text-slate-500">(dùng cho quét NHÓM — AI biến tấu khác nhau mỗi bài)</span></div>
             <Textarea rows={3} value={cfgL.seedContent || ''} onChange={e => setLocal({ ...cfgL, seedContent: e.target.value })}
-              onBlur={() => setCfg({ seedContent: cfgL.seedContent || '' })}
+              onBlur={() => {
+                if (cfgL.seedContent !== (s.cfg?.seedContent || '')) {
+                  setCfg({ seedContent: cfgL.seedContent || '' })
+                }
+              }}
               placeholder={'Ví dụ: Bên em chuyên sỉ/lẻ cây cảnh mini giá tốt, ai cần ib em tư vấn nhé. Zalo 09xxx.\n\nĐể trống = AI tự soạn comment hợp từng bài.'} />
             <p className="mt-1 text-xs text-slate-500">Có nội dung → AI biến tấu lời mời của bạn cho từng bài. Để trống → AI bình luận tự nhiên theo nội dung bài.</p>
             

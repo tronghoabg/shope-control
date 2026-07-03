@@ -201,7 +201,11 @@ export default function CommentGroups() {
                     rows={3} 
                     value={cfgL.seedContent || ''} 
                     onChange={e => setLocal({ ...cfgL, seedContent: e.target.value })}
-                    onBlur={() => setCfg({ seedContent: cfgL.seedContent || '' })}
+                    onBlur={() => {
+                      if (cfgL.seedContent !== (s.cfg?.seedContent || '')) {
+                        setCfg({ seedContent: cfgL.seedContent || '' })
+                      }
+                    }}
                     placeholder="Vd: Bên em chuyên sỉ/lẻ tai nghe, phụ kiện giá tốt, bảo hành chính hãng ạ." 
                   />
                 </Field>
