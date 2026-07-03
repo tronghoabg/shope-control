@@ -146,8 +146,6 @@ export default function App() {
   const queueCount = s?.queue?.length ?? 0
   const logCount = s?.logs?.length ?? 0
 
-  useEffect(() => { if (connected && s && !aiReady) setPage('settings') }, [connected, s, aiReady])
-
   // Sau vài giây vẫn chưa kết nối
   const [notInstalled, setNotInstalled] = useState(false)
   useEffect(() => {
