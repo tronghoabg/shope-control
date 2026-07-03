@@ -155,9 +155,9 @@ export default function App() {
           Không tìm thấy extension <b>ToolMKT AI</b> trên trình duyệt của bạn. Hãy cài đặt extension để bắt đầu tự động hóa Facebook.
         </div>
         <div className="flex flex-wrap items-center justify-center gap-3">
-          <a download href="/extension.zip"
+          <a href="https://chromewebstore.google.com/detail/mocolnncfiogaiiijfkjnoggmeplbfel" target="_blank" rel="noreferrer"
             className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-md shadow-indigo-900/30 hover:bg-indigo-500 transition-colors">
-            <IconPlugConnected size={18} /> Tải Extension (.ZIP)
+            <IconPlugConnected size={18} /> Cài đặt từ Chrome Store
           </a>
           <a href="/cai-dat"
             className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/40 px-5 py-3 text-sm font-semibold text-slate-200 hover:bg-slate-800 transition-colors">
@@ -165,7 +165,7 @@ export default function App() {
           </a>
         </div>
         <div className="max-w-md text-xs leading-relaxed text-slate-500 bg-slate-900/30 border border-slate-800/60 p-4 rounded-2xl">
-          Đã cài rồi? Hãy mở <code className="rounded bg-slate-800/80 px-1.5 py-0.5 text-slate-300 font-mono">chrome://extensions</code> → bật <b>Chế độ nhà phát triển (Developer mode)</b> → chọn <b>Tải thư mục đã giải nén (Load unpacked)</b> thư mục <code className="rounded bg-slate-800/80 px-1.5 py-0.5 text-slate-300 font-mono">extension/</code>, sau đó bấm <b>F5 (Tải lại)</b> trang này.
+          Đã cài rồi? Hãy đảm bảo bạn đã bật Extension trên Chrome, sau đó bấm <b>F5 (Tải lại)</b> trang này.
         </div>
       </div>
     )

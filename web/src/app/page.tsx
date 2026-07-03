@@ -30,7 +30,7 @@ const STEPS = [
 const FAQS = [
   { q: 'Tôi có cần mua API key AI không?', a: 'Không. AI đã tích hợp sẵn theo gói — chỉ cần đăng nhập tài khoản là dùng được. Nếu muốn, bạn vẫn có thể dùng API key riêng.' },
   { q: 'Dùng tool có bị khoá Facebook không?', a: 'Tool chạy ngay trong tab Facebook thật của bạn (không qua máy chủ trung gian), có giãn cách ngẫu nhiên, giới hạn/ngày và duyệt tay để hạn chế rủi ro. Bạn nên dùng điều độ.' },
-  { q: 'Cài đặt có khó không?', a: 'Khoảng 2 phút: tải extension, Load unpacked trên Chrome, đăng nhập rồi mở app — phần liên kết tài khoản diễn ra tự động.' },
+  { q: 'Cài đặt có khó không?', a: 'Chỉ mất 1 cú click: Cài đặt ToolMKT AI trực tiếp từ cửa hàng Chrome Web Store chính thức, đăng nhập rồi mở app — phần liên kết tài khoản diễn ra tự động.' },
   { q: 'Gói miễn phí dùng được gì?', a: `Miễn phí ${PLANS.free.dailyActions} comment + bài đăng mỗi ngày, đủ để trải nghiệm toàn bộ tính năng. Nâng cấp khi cần chạy nhiều hơn.` },
 ]
 
@@ -74,9 +74,9 @@ export default async function Home() {
             Bạn chỉ việc chọn &amp; bấm — chạy ngay trong trình duyệt, an toàn tài khoản.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
-            <a download href="/extension.zip"
+            <a href="https://chromewebstore.google.com/detail/mocolnncfiogaiiijfkjnoggmeplbfel" target="_blank" rel="noreferrer"
               className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-red-600 px-6 py-3 text-base font-semibold text-white shadow-lg shadow-orange-600/20 transition-colors hover:from-orange-400 hover:to-red-500">
-              <Download size={18} /> Tải Extension (Chrome)
+              <Download size={18} /> Cài đặt từ Chrome Store
             </a>
             <LinkBtn href="/app" variant="default" className="px-6 py-3 text-base">Mở công cụ <ArrowRight size={16} /></LinkBtn>
           </div>
@@ -134,7 +134,7 @@ export default async function Home() {
           ))}
         </div>
         <div className="mt-8 flex justify-center gap-3">
-          <a download href="/extension.zip" className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-5 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-700"><Download size={16} /> Tải Extension</a>
+          <a href="https://chromewebstore.google.com/detail/mocolnncfiogaiiijfkjnoggmeplbfel" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-5 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-700"><Download size={16} /> Cài từ Chrome Store</a>
           <LinkBtn href="/cai-dat" variant="primary">Hướng dẫn chi tiết <ArrowRight size={16} /></LinkBtn>
         </div>
       </section>
@@ -173,7 +173,7 @@ export default async function Home() {
           <p className="mx-auto mt-3 max-w-xl text-slate-400">Cài extension, đăng nhập và để AI lo phần tìm nhóm, soạn nội dung và đăng bài.</p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">
             <LinkBtn href="/register" variant="brand" className="px-6 py-3 text-base">Dùng thử miễn phí</LinkBtn>
-            <a download href="/extension.zip" className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-6 py-3 text-base font-semibold text-slate-100 hover:bg-slate-700"><Download size={18} /> Tải Extension</a>
+            <a href="https://chromewebstore.google.com/detail/mocolnncfiogaiiijfkjnoggmeplbfel" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-6 py-3 text-base font-semibold text-slate-100 hover:bg-slate-700"><Download size={18} /> Cài từ Chrome Store</a>
           </div>
         </div>
       </section>
