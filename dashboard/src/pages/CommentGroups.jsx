@@ -7,7 +7,7 @@ import {
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
 import { Card, Btn, Badge, Field, Input, Textarea, Toggle, Empty, Hint } from '../ui.jsx'
-import { QueueItem, usePoster, MIN_DELAY } from '../commentShared.jsx'
+import { QueueItem, usePoster, MIN_DELAY, ProgressPanel } from '../commentShared.jsx'
 import { LogFeed } from '../LogPanel.jsx'
 
 const KINDS = [
@@ -20,7 +20,7 @@ const scoreColor = (n) => n == null ? 'gray' : n >= 70 ? 'green' : n >= 40 ? 'ye
 
 export default function CommentGroups() {
   const { s, call, setCfg, notify, account } = useShope()
-  const { posting, pstat, post, stop } = usePoster()
+  const { posting, pstat, results, post, stop } = usePoster()
   const [cfgL, setLocal] = useState(null)
   const [sel, setSel] = useState(() => new Set())
   const [scanning, setScanning] = useState(false)
@@ -499,16 +499,9 @@ export default function CommentGroups() {
 
           {/* Logs Panel (Right Side) */}
           <div className="w-full xl:w-96 shrink-0 xl:sticky xl:top-6">
-            <Card className="p-0 flex flex-col xl:h-[calc(100vh-8rem)] border-slate-800 bg-slate-950/40">
-              <div className="flex items-center gap-2 border-b border-slate-850 px-4 py-3 text-sm font-semibold text-slate-200 shrink-0">
-                <IconHistory size={16} className="text-indigo-400" />
-                <span>Nhật ký trực tiếp</span>
-                <button onClick={() => call({ type: 'CLEAR_LOGS' })} className="ml-auto text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-slate-300 transition-colors">Xóa</button>
-              </div>
-              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-                <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
-              </div>
-            </Card>
+            <ProgressPanel results={results} posting={posting} pstat={pstat}>
+              <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
+            </ProgressPanel>
           </div>
         </div>
       )}

@@ -8,6 +8,7 @@ import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
 import { Btn, Badge, Field, Input, Textarea, Toggle, Card, Empty } from '../ui.jsx'
 import { LogFeed } from '../LogPanel.jsx'
+import { usePoster, ProgressPanel } from '../commentShared.jsx'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const MIN_DELAY = 90   // an toàn checkpoint: không cho nhanh hơn 90s
@@ -51,11 +52,9 @@ export default function Queue() {
   const [cfgL, setLocal] = useState(null)
   const [panel, setPanel] = useState(null) // 'groups' | 'pages' | 'adv' | 'auto' | null
   const [sel, setSel] = useState(() => new Set())
+  const { posting, pstat, results, post, stop } = usePoster()
   const [scanning, setScanning] = useState(false)
-  const [posting, setPosting] = useState(false)
-  const [pstat, setPstat] = useState({ done: 0, total: 0, wait: 0 })
   const [listName, setListName] = useState('')
-  const stopRef = useRef(false)
 
   // Luồng Page: tự lấy bài → user chọn + tự đặt nội dung
   const [pagePosts, setPagePosts] = useState([])
@@ -167,27 +166,11 @@ export default function Queue() {
   const toggleAll = () => setSel(allSelected ? new Set() : new Set(queue.map(q => q.postId)))
   const selCount = queue.filter(q => sel.has(q.postId)).length
 
-  const bulkPost = async () => {
+  const bulkPost = () => {
     const ids = queue.filter(q => sel.has(q.postId)).map(q => q.postId)
-    if (!ids.length) return notify('red', 'Chưa chọn bài nào')
-    setPosting(true); stopRef.current = false; setPstat({ done: 0, total: ids.length, wait: 0 })
-    let ok = 0, fail = 0
-    for (let i = 0; i < ids.length; i++) {
-      if (stopRef.current) break
-      let r
-      try { r = await ext({ type: 'POST_ITEM', postId: ids[i] }, 60000) } catch (e) { r = { ok: false, error: String(e?.message || e) } }
-      if (r?.quotaBlocked) { notify('red', r.error || 'Hết hạn mức hôm nay'); break }
-      if (r?.ok) ok++; else fail++
-      setSel(prev => { const n = new Set(prev); n.delete(ids[i]); return n })
-      setPstat(p => ({ ...p, done: i + 1 })); refresh()
-      if (i < ids.length - 1 && !stopRef.current) {
-        const lo = Math.max(MIN_DELAY, Math.min(cfg.minDelaySec, cfg.maxDelaySec)), hi = Math.max(lo, Math.max(cfg.minDelaySec, cfg.maxDelaySec))
-        let secs = lo + Math.floor(Math.random() * (hi - lo + 1))
-        for (; secs > 0 && !stopRef.current; secs--) { setPstat(p => ({ ...p, wait: secs })); await sleep(1000) }
-      }
-    }
-    setPosting(false); setPstat({ done: 0, total: 0, wait: 0 })
-    notify(fail ? 'blue' : 'green', `Đã đăng ${ok}/${ids.length} bài`)
+    post(ids, (id) => {
+      setSel(prev => { const n = new Set(prev); n.delete(id); return n })
+    })
   }
 
   const kindDesc = KINDS.find(k => k.k === kind)?.d
@@ -402,7 +385,7 @@ export default function Queue() {
           <span className="text-xs text-slate-500">{queue.length} bài{selCount ? ` · chọn ${selCount}` : ''}</span>
           <div className="ml-auto">
             {posting
-              ? <Btn size="sm" variant="danger" icon={IconPlayerStop} onClick={() => { stopRef.current = true; notify('blue', 'Đang dừng…') }}>Dừng {pstat.done}/{pstat.total}{pstat.wait ? ` (${pstat.wait}s)` : ''}</Btn>
+              ? <Btn size="sm" variant="danger" icon={IconPlayerStop} onClick={stop}>Dừng {pstat.done}/{pstat.total}{pstat.wait ? ` (${pstat.wait}s)` : ''}</Btn>
               : <Btn size="sm" variant="success" icon={IconSend} disabled={!selCount} onClick={bulkPost}>{postLabel} ({selCount})</Btn>}
           </div>
         </div>
@@ -416,16 +399,9 @@ export default function Queue() {
 
       {/* Logs Panel (Right Side) */}
       <div className="w-full xl:w-96 shrink-0 xl:sticky xl:top-6">
-        <Card className="p-0 flex flex-col xl:h-[calc(100vh-8rem)] border-slate-800 bg-slate-950/40">
-          <div className="flex items-center gap-2 border-b border-slate-850 px-4 py-3 text-sm font-semibold text-slate-200 shrink-0">
-            <IconHistory size={16} className="text-indigo-400" />
-            <span>Nhật ký hệ thống</span>
-            <button onClick={() => call({ type: 'CLEAR_LOGS' })} className="ml-auto text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-slate-300 transition-colors">Xóa</button>
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-            <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
-          </div>
-        </Card>
+        <ProgressPanel results={results} posting={posting} pstat={pstat}>
+          <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
+        </ProgressPanel>
       </div>
     </div>
   )

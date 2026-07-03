@@ -6,12 +6,12 @@ import {
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
 import { Card, Btn, Badge, Textarea, Empty, Hint, Input, Field } from '../ui.jsx'
-import { QueueItem, usePoster } from '../commentShared.jsx'
+import { QueueItem, usePoster, ProgressPanel } from '../commentShared.jsx'
 import { LogFeed } from '../LogPanel.jsx'
 
 export default function CommentPages({ goto }) {
   const { s, call, notify, account } = useShope()
-  const { posting, pstat, post, stop } = usePoster()
+  const { posting, pstat, results, post, stop } = usePoster()
   const [pagePosts, setPagePosts] = useState([])
   const [selPP, setSelPP] = useState(() => new Set())
   const [pageContent, setPageContent] = useState('')
@@ -341,16 +341,9 @@ export default function CommentPages({ goto }) {
           </div>
           {/* Logs Panel (Right Side) */}
           <div className="w-full xl:w-96 shrink-0 xl:sticky xl:top-6">
-            <Card className="p-0 flex flex-col xl:h-[calc(100vh-8rem)] border-slate-800 bg-slate-950/40">
-              <div className="flex items-center gap-2 border-b border-slate-850 px-4 py-3 text-sm font-semibold text-slate-200 shrink-0">
-                <IconHistory size={16} className="text-indigo-400" />
-                <span>Nhật ký rải Fanpage</span>
-                <button onClick={() => call({ type: 'CLEAR_LOGS' })} className="ml-auto text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-slate-300 transition-colors">Xóa</button>
-              </div>
-              <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-                <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
-              </div>
-            </Card>
+            <ProgressPanel results={results} posting={posting} pstat={pstat}>
+              <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
+            </ProgressPanel>
           </div>
         </div>
       )}
