@@ -26,6 +26,30 @@ export function ShopeProvider({ children }) {
   }, [])
 
   const refresh = useCallback(async () => {
+    if (typeof window !== 'undefined' && window.location.search.includes('promo=1')) {
+      setConnected(true)
+      setS({
+        cfg: {
+          dailyCap: 30, minDelaySec: 90, maxDelaySec: 240, mode: 'comment', autoEnabled: true, autoLimit: 50, autoDelaySec: 30,
+          targetType: 'all', minGroupMembers: 1000, targetGroups: ['1', '2', '3']
+        },
+        stats: { totalCommented: 1254, totalFound: 3820 },
+        state: { doneToday: 18 },
+        queue: [
+          { postId: '111', groupName: 'Hội Review Đồ Gia Dụng', comment: 'Em thấy mã này bên Shopee đang Flash Sale giảm 50% rẻ hơn ngoài store nhiều lắm, các bác tham khảo thử nhé! Link đây ạ: https://shp.ee/...', score: 95, permalink: '#' },
+          { postId: '222', groupName: 'Cộng đồng Affiliate Việt Nam', comment: 'Bên mình có tool hỗ trợ rải link tự động siêu nhàn, tiết kiệm thời gian mà vẫn đảm bảo an toàn. Bác nào quan tâm inbox mình share nhé!', score: 88, permalink: '#' },
+          { postId: '333', groupName: 'Nghiện Mua Sắm Shopee', comment: 'Áo này chất thun gân mặc mát lắm, form lên chuẩn đẹp. Đợt trước mình mua link này uy tín nè: https://shp.ee/...', score: 92, permalink: '#' }
+        ],
+        discoveredGroups: [
+          { id: '1', name: 'Cộng đồng Affiliate Việt Nam', member_count: 125000 },
+          { id: '2', name: 'Nghiện Mua Sắm Shopee', member_count: 550000 },
+          { id: '3', name: 'Review Đồ Gia Dụng', member_count: 85000 },
+          { id: '4', name: 'Hội Mẹ Bỉm Sữa', member_count: 320000 }
+        ]
+      })
+      return
+    }
+
     let r = await ext({ type: 'GET_STATE' })
     if (!r?.ok) {
       failCount.current++
@@ -124,9 +148,9 @@ export function ShopeProvider({ children }) {
   const setCfg = useCallback((cfg) => call({ type: 'SET_CFG', cfg }), [call])
 
   // AI do hệ thống cung cấp → chỉ cần đăng nhập tài khoản là dùng được (không còn API key riêng).
-  const aiReady = !!account?.loggedIn
+  const aiReady = !!account?.loggedIn || (typeof window !== 'undefined' && window.location.search.includes('promo=1'))
 
-  const value = { s, connected, aiReady, account, refresh, refreshAccount, connectFb, call, setCfg, notify, toasts }
+  const value = { s, connected, aiReady, account: account || (typeof window !== 'undefined' && window.location.search.includes('promo=1') ? { loggedIn: true, profile: { name: 'Promo Account', email: 'promo@toolmktai.com' } } : null), refresh, refreshAccount, connectFb, call, setCfg, notify, toasts }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
 

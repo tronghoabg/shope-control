@@ -89,6 +89,18 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* Visual Showcase */}
+      <section className="mx-auto max-w-6xl px-6 pb-20">
+        <div className="relative rounded-2xl border border-slate-800 bg-slate-900/50 p-2 shadow-2xl overflow-hidden group">
+          <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-orange-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative z-10">
+            <img src="/promo/dashboard.jpg" alt="Dashboard" className="rounded-xl object-cover w-full aspect-[16/10] shadow-md hover:scale-[1.02] transition-transform duration-300" />
+            <img src="/promo/social.jpg" alt="Social Automation" className="rounded-xl object-cover w-full aspect-[16/10] shadow-md hover:scale-[1.02] transition-transform duration-300" />
+            <img src="/promo/ai.jpg" alt="AI Writing" className="rounded-xl object-cover w-full aspect-[16/10] shadow-md hover:scale-[1.02] transition-transform duration-300" />
+          </div>
+        </div>
+      </section>
+
       {/* Value strip */}
       <section className="mx-auto max-w-5xl px-6 pb-20">
         <div className="grid gap-6 rounded-2xl border border-slate-800 bg-slate-900/40 p-6 sm:grid-cols-3">
