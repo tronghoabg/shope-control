@@ -296,7 +296,7 @@ export default function App() {
           {/* ── CONTAINER ── */}
           <div className="flex min-h-0 flex-1">
             <main className="flex-1 overflow-y-auto p-6 md:p-8">
-              <div className="mx-auto max-w-5xl space-y-6">
+              <div className="w-full max-w-[1600px] mx-auto space-y-6">
                 {NAV.find(n => n.key === page)?.render(setPage)}
               </div>
             </main>
