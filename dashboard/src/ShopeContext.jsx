@@ -121,7 +121,7 @@ export function ShopeProvider({ children }) {
     return r
   }, [refresh, notify])
 
-  const setCfg = useCallback((cfg) => call({ type: 'SET_CFG', cfg }, { okMsg: 'Đã lưu' }), [call])
+  const setCfg = useCallback((cfg) => call({ type: 'SET_CFG', cfg }), [call])
 
   // AI do hệ thống cung cấp → chỉ cần đăng nhập tài khoản là dùng được (không còn API key riêng).
   const aiReady = !!account?.loggedIn

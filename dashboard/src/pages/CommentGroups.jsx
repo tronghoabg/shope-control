@@ -25,6 +25,7 @@ export default function CommentGroups() {
   const [sel, setSel] = useState(() => new Set())
   const [scanning, setScanning] = useState(false)
   const [listName, setListName] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [step, setStep] = useState(2) // default to Step 3 (index 2) so they see queue immediately
 
   const pool = useMemo(() => {
@@ -94,8 +95,22 @@ export default function CommentGroups() {
   const saveTargets = (ids) => call({ type: 'SET_TARGETS', groupIds: [...new Set(ids)] })
   const toggleTarget = (id) => saveTargets(targetSet.has(id) ? targets.filter(x => x !== id) : [...targets, id])
   const applyList = (l) => call({ type: 'SET_TARGETS', groupIds: l.groupIds }, { okMsg: `Đã chọn "${l.name}" (${l.groupIds.length} nhóm)` })
-  const allSel = pool.length > 0 && pool.every(g => targetSet.has(g.id))
-  const toggleAllPool = () => saveTargets(allSel ? [] : pool.map(g => g.id))
+  
+  const filteredPool = useMemo(() => {
+    if (!searchQuery.trim()) return pool
+    const q = searchQuery.toLowerCase()
+    return pool.filter(g => (g.name || '').toLowerCase().includes(q) || (g.id || '').toLowerCase().includes(q))
+  }, [pool, searchQuery])
+
+  const allSel = filteredPool.length > 0 && filteredPool.every(g => targetSet.has(g.id))
+  const toggleAllPool = () => {
+    if (allSel) {
+      saveTargets(targets.filter(x => !filteredPool.some(g => g.id === x)))
+    } else {
+      const adding = filteredPool.filter(g => !targetSet.has(g.id)).map(g => g.id)
+      saveTargets([...targets, ...adding])
+    }
+  }
   
   const saveList = async () => {
     if (!nGroups) return notify('red', 'Chưa chọn nhóm nào')
@@ -282,21 +297,30 @@ export default function CommentGroups() {
           <div className="grid gap-5 md:grid-cols-3">
             <div className="md:col-span-2">
               <Card className="flex flex-col h-[32rem]">
-                <div className="flex items-center justify-between border-b border-slate-850 px-5 py-4">
-                  <label className="flex cursor-pointer items-center gap-2.5 text-sm font-bold text-slate-200">
-                    <input type="checkbox" checked={allSel} disabled={!pool.length} onChange={toggleAllPool} className="h-4.5 w-4.5 accent-indigo-500 rounded border-slate-850" />
-                    <span>Tất cả nhóm đã tham gia ({pool.length})</span>
-                  </label>
-                  {nGroups > 0 && <span className="text-xs text-slate-400">Đã chọn {nGroups} nhóm</span>}
+                <div className="flex items-center justify-between border-b border-slate-850 px-5 py-3">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="flex cursor-pointer items-center gap-2.5 text-sm font-bold text-slate-200">
+                      <input type="checkbox" checked={allSel} disabled={!filteredPool.length} onChange={toggleAllPool} className="h-4.5 w-4.5 accent-indigo-500 rounded border-slate-850" />
+                      <span>Chọn / Bỏ chọn tất cả ({filteredPool.length})</span>
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="Tìm kiếm nhóm..." 
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="text-sm bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-slate-200 focus:border-indigo-500 focus:outline-none placeholder-slate-500 w-64"
+                    />
+                  </div>
+                  {nGroups > 0 && <span className="text-xs text-slate-400 self-start mt-1">Đã chọn {nGroups} / {pool.length} nhóm</span>}
                 </div>
 
-                {pool.length === 0 ? (
+                {filteredPool.length === 0 ? (
                   <Empty icon={IconUsersGroup}>
-                    Không tìm thấy nhóm nào. Vui lòng sang tab <b>Nhóm của tôi</b> để Quét đồng bộ dữ liệu nhóm đã tham gia.
+                    {searchQuery ? 'Không tìm thấy nhóm nào khớp với từ khóa' : 'Không tìm thấy nhóm nào. Vui lòng sang tab Nhóm của tôi để Quét đồng bộ dữ liệu nhóm đã tham gia.'}
                   </Empty>
                 ) : (
                   <div className="flex-1 divide-y divide-slate-850 overflow-y-auto">
-                    {pool.map(g => (
+                    {filteredPool.map(g => (
                       <div key={g.id} onClick={() => toggleTarget(g.id)}
                         className={`flex cursor-pointer items-center gap-3.5 px-5 py-3 hover:bg-slate-900/30 transition-colors ${targetSet.has(g.id) ? 'bg-indigo-500/[0.03]' : ''}`}>
                         <input type="checkbox" checked={targetSet.has(g.id)} readOnly className="pointer-events-none h-4.5 w-4.5 accent-indigo-500 rounded border-slate-800" />
