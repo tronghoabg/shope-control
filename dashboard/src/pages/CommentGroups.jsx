@@ -19,7 +19,7 @@ const KINDS = [
 const scoreColor = (n) => n == null ? 'gray' : n >= 70 ? 'green' : n >= 40 ? 'yellow' : 'gray'
 
 export default function CommentGroups() {
-  const { s, call, setCfg, notify } = useShope()
+  const { s, call, setCfg, notify, account } = useShope()
   const { posting, pstat, post, stop } = usePoster()
   const [cfgL, setLocal] = useState(null)
   const [sel, setSel] = useState(() => new Set())
@@ -376,7 +376,10 @@ export default function CommentGroups() {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Btn size="sm" variant="success" icon={IconPlayerPlay} disabled={running} onClick={() => call({ type: 'START_AUTO' }, { okMsg: 'Đã kích hoạt Auto', errMsg: 'Không bật được Auto' })}>Bật Auto</Btn>
+                  <Btn size="sm" variant="success" icon={IconPlayerPlay} onClick={() => {
+                    if (!account?.loggedIn) return notify('red', 'Vui lòng đăng nhập tài khoản hệ thống để sử dụng tính năng này')
+                    call({ type: 'START_AUTO' }, { okMsg: 'Đã bật Auto' })
+                  }}>Bật rải tự động liên tục (Auto)</Btn>
                   <Btn size="sm" icon={IconPlayerStop} onClick={() => call({ type: 'STOP_AUTO' }, { okMsg: 'Đã tắt Auto' })}>Tắt Auto</Btn>
                   <Btn size="sm" variant="danger" icon={IconHandStop} onClick={() => call({ type: 'KILL' }, { okMsg: 'Đã dừng khẩn cấp' })}>Kill</Btn>
                 </div>
@@ -420,7 +423,10 @@ export default function CommentGroups() {
               <div>
                 {posting
                   ? <Btn size="sm" variant="danger" icon={IconPlayerStop} onClick={stop}>Dừng {pstat.done}/{pstat.total}{pstat.wait ? ` (nghỉ ${pstat.wait}s)` : ''}</Btn>
-                  : <Btn size="sm" variant="success" icon={IconSend} disabled={!selCount} onClick={bulkPost}>{postLabel} hàng loạt ({selCount})</Btn>}
+                  : <Btn size="sm" variant="success" icon={IconSend} disabled={!selCount} onClick={() => {
+                      if (!account?.loggedIn) return notify('red', 'Vui lòng đăng nhập tài khoản hệ thống để sử dụng tính năng này')
+                      bulkPost()
+                    }}>{postLabel} hàng loạt ({selCount})</Btn>}
               </div>
             </div>
 

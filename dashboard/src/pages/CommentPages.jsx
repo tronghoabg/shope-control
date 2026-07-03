@@ -10,7 +10,7 @@ import { QueueItem, usePoster } from '../commentShared.jsx'
 import { LogFeed } from '../LogPanel.jsx'
 
 export default function CommentPages({ goto }) {
-  const { s, call, notify } = useShope()
+  const { s, call, notify, account } = useShope()
   const { posting, pstat, post, stop } = usePoster()
   const [pagePosts, setPagePosts] = useState([])
   const [selPP, setSelPP] = useState(() => new Set())
@@ -318,7 +318,10 @@ export default function CommentPages({ goto }) {
               <div>
                 {posting
                   ? <Btn size="sm" variant="danger" icon={IconPlayerStop} onClick={stop}>Dừng {pstat.done}/{pstat.total}{pstat.wait ? ` (nghỉ ${pstat.wait}s)` : ''}</Btn>
-                  : <Btn size="sm" variant="success" icon={IconSend} disabled={!selCount} onClick={bulkPost}>Đăng comment ({selCount})</Btn>}
+                  : <Btn size="sm" variant="success" icon={IconSend} disabled={!selCount} onClick={() => {
+                      if (!account?.loggedIn) return notify('red', 'Vui lòng đăng nhập tài khoản hệ thống để sử dụng tính năng này')
+                      bulkPost()
+                    }}>Đăng comment ({selCount})</Btn>}
               </div>
             </div>
 

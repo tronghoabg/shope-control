@@ -32,7 +32,7 @@ const BG_PRESETS = [
 ]
 
 export default function PostGroups() {
-  const { s, aiReady, notify, refresh } = useShope()
+  const { s, aiReady, notify, refresh, account } = useShope()
   const [content, setContent] = useState('')
   const [link, setLink] = useState('')
   const [images, setImages] = useState([])   // [{ name, url(dataURL) }]
@@ -158,7 +158,10 @@ export default function PostGroups() {
         <div className="flex items-center gap-3">
           {running
             ? <Btn variant="danger" icon={IconPlayerStop} onClick={stop}>Dừng chiến dịch</Btn>
-            : <Btn variant="primary" icon={IconPlayerPlay} onClick={run} disabled={!sel.size || (!content.trim() && !images.length)}>Khởi chạy ({sel.size} nhóm)</Btn>}
+            : <Btn variant="primary" icon={IconPlayerPlay} onClick={() => {
+                if (!account?.loggedIn) return notify('red', 'Vui lòng đăng nhập tài khoản hệ thống để sử dụng tính năng này')
+                run()
+              }} disabled={!sel.size || (!content.trim() && !images.length)}>Khởi chạy ({sel.size} nhóm)</Btn>}
         </div>
       </div>
 
