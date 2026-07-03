@@ -153,8 +153,10 @@ export function Toggle({ checked, onChange, label }) {
   return (
     <label className="flex cursor-pointer items-center gap-3 select-none">
       <button type="button" onClick={() => onChange(!checked)}
-        className={cx('relative h-[24px] w-[44px] shrink-0 rounded-full transition-colors duration-200 outline-none', checked ? 'bg-indigo-600 shadow-inner' : 'bg-slate-700')}>
-        <span className={cx('absolute top-[2px] left-[2px] h-[20px] w-[20px] rounded-full bg-white transition-transform shadow duration-200', checked ? 'translate-x-[20px]' : 'translate-x-0')} />
+        className={cx('relative shrink-0 rounded-full transition-colors duration-200 outline-none block', checked ? 'bg-indigo-600 shadow-inner' : 'bg-slate-600')}
+        style={{ width: 44, height: 24, minWidth: 44 }}>
+        <span className="absolute rounded-full bg-white transition-transform shadow duration-200" 
+          style={{ width: 20, height: 20, top: 2, left: 2, transform: checked ? 'translateX(20px)' : 'translateX(0)' }} />
       </button>
       {label && <span className="text-sm font-medium text-slate-300 hover:text-slate-100 transition-colors">{label}</span>}
     </label>
