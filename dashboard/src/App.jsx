@@ -24,17 +24,20 @@ function AccountBox({ account, onManage }) {
   const usedTxt = a.remaining === -1 ? 'Không giới hạn' : `${a.usedToday ?? 0}/${a.dailyLimit ?? 5}`
   const initial = (a.name || a.email || '?')[0].toUpperCase()
   return (
-    <div className="mt-auto border-t border-slate-800/50 p-3 bg-slate-950/25">
-      <button onClick={onManage} className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left border border-slate-800/80 bg-slate-900/30 hover:bg-slate-900/60 transition-colors">
-        <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-xs font-extrabold border ${
+    <div className="mt-auto p-4 bg-gradient-to-b from-transparent to-slate-950/50 border-t border-slate-900/50">
+      <button onClick={onManage} className={`relative flex w-full items-center gap-3 rounded-2xl p-3 text-left border transition-all duration-300 shadow-lg overflow-hidden group ${
+        pro ? 'border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-orange-500/5 hover:border-amber-500/50' : 'border-slate-800/80 bg-slate-900/50 hover:bg-slate-900/80 hover:border-slate-700'
+      }`}>
+        {pro && <div className="absolute inset-0 bg-gradient-to-br from-amber-400/5 to-transparent pointer-events-none" />}
+        <div className={`relative grid h-10 w-10 shrink-0 place-items-center rounded-xl text-sm font-extrabold shadow-inner ${
           pro 
-            ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' 
-            : 'bg-indigo-600 text-white border-indigo-500/30'
+            ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-orange-500/30' 
+            : 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-indigo-500/30'
         }`}>
-          {pro ? <IconCrown size={15} /> : initial}
+          {pro ? <IconCrown size={18} /> : initial}
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-bold text-slate-200">{a.name || a.email}</div>
+        <div className="min-w-0 flex-1 relative z-10">
+          <div className="truncate text-xs font-bold text-slate-200 group-hover:text-white transition-colors">{a.name || a.email}</div>
           <div className="flex items-center gap-1.5 text-[10px] mt-0.5">
             <span className={pro ? 'font-bold text-amber-400' : 'text-slate-500'}>{PLAN_NAME[a.plan] || 'Free'}</span>
             <span className="text-slate-700">·</span>
@@ -102,15 +105,16 @@ const SECTIONS = [
 // Chip trạng thái kết nối ở header (xanh = ok, đỏ = chưa)
 function StatusChip({ ok, icon: Icon, label, title, onClick }) {
   const cls = ok 
-    ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400 hover:bg-emerald-500/10' 
-    : 'border-red-500/20 bg-red-500/5 text-red-400 hover:bg-red-500/10'
+    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' 
+    : 'border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20'
   return (
     <button type="button" onClick={onClick || undefined} title={title} disabled={!onClick}
-      className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold tracking-wide transition-all duration-200 ${cls} ${onClick ? 'cursor-pointer hover:scale-102' : 'cursor-default'}`}>
+      className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-semibold tracking-wide transition-all duration-300 ${cls} ${onClick ? 'cursor-pointer hover:scale-105' : 'cursor-default'}`}>
       <Icon size={14} className="shrink-0" />
       <span className="hidden sm:inline">{label}</span>
-      <span className="relative flex h-1.5 w-1.5 shrink-0">
-        <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${ok ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
+      <span className="relative flex h-2 w-2 shrink-0">
+        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${ok ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
+        <span className={`relative inline-flex rounded-full h-2 w-2 ${ok ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
       </span>
     </button>
   )
@@ -242,14 +246,15 @@ export default function App() {
                         key={item.key} 
                         disabled={locked} 
                         onClick={() => setPage(item.key)}
-                        className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold tracking-wide transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed
+                        className={`group relative flex items-center gap-3 rounded-xl px-4 py-3 text-xs font-bold tracking-wide transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed overflow-hidden
                           ${active 
-                            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-950/50 border border-indigo-500/20' 
-                            : 'text-slate-400 border border-transparent hover:text-slate-200 hover:bg-slate-900/40 hover:border-slate-900/50'
+                            ? 'text-white bg-indigo-500/[0.08] shadow-sm' 
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
                           }`}
                       >
-                        <item.icon size={16} className={`shrink-0 ${active ? 'text-white' : 'text-slate-500 group-hover:text-slate-300 transition-colors'}`} />
-                        <span className="flex-1 text-left truncate">{item.label}</span>
+                        {active && <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-indigo-500 to-purple-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]" />}
+                        <item.icon size={18} className={`shrink-0 z-10 relative transition-transform duration-300 ${active ? 'text-indigo-400 scale-110' : 'text-slate-500 group-hover:text-slate-300 group-hover:scale-105'}`} />
+                        <span className="flex-1 text-left truncate z-10 relative">{item.label}</span>
                         {item.key === 'queue' && queueCount > 0 && (
                           <span className="grid h-5 min-w-5 place-items-center rounded-full bg-orange-500 px-1 text-[10px] font-bold text-white">{queueCount}</span>
                         )}

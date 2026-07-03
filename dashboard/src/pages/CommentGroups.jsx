@@ -130,38 +130,41 @@ export default function CommentGroups() {
       </div>
 
       {/* Stepper Navigation */}
-      <div className="grid grid-cols-3 rounded-xl border border-slate-800 bg-slate-900/20 p-1 backdrop-blur-md">
+      <div className="grid grid-cols-3 rounded-2xl border border-slate-800/60 bg-slate-900/40 p-1.5 backdrop-blur-xl shadow-lg shadow-black/20 relative">
         <button
           onClick={() => setStep(0)}
-          className={`flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-bold tracking-wide uppercase transition-all ${
+          className={`relative z-10 flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-bold tracking-wide uppercase transition-all duration-300 ${
             step === 0 
-              ? 'bg-indigo-650 text-white shadow-md border border-indigo-500/20' 
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'text-white' 
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
           }`}
         >
-          <IconSettings size={15} />
+          {step === 0 && <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl shadow-md shadow-indigo-500/20 -z-10" />}
+          <IconSettings size={16} />
           <span>Bước 1: Cấu hình</span>
         </button>
         <button
           onClick={() => setStep(1)}
-          className={`flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-bold tracking-wide uppercase transition-all ${
+          className={`relative z-10 flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-bold tracking-wide uppercase transition-all duration-300 ${
             step === 1 
-              ? 'bg-indigo-650 text-white shadow-md border border-indigo-500/20' 
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'text-white' 
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
           }`}
         >
-          <IconTarget size={15} />
+          {step === 1 && <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl shadow-md shadow-indigo-500/20 -z-10" />}
+          <IconTarget size={16} />
           <span>Bước 2: Nhóm mục tiêu ({nGroups})</span>
         </button>
         <button
           onClick={() => setStep(2)}
-          className={`flex items-center justify-center gap-2 rounded-lg py-2.5 text-xs font-bold tracking-wide uppercase transition-all ${
+          className={`relative z-10 flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-bold tracking-wide uppercase transition-all duration-300 ${
             step === 2 
-              ? 'bg-indigo-650 text-white shadow-md border border-indigo-500/20' 
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'text-white' 
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
           }`}
         >
-          <IconRadar size={15} />
+          {step === 2 && <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl shadow-md shadow-indigo-500/20 -z-10" />}
+          <IconRadar size={16} />
           <span>Bước 3: Vận hành ({queue.length})</span>
         </button>
       </div>

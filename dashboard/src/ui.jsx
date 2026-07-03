@@ -26,7 +26,7 @@ export function Card({ className, children, ...p }) {
   return (
     <div 
       className={cx(
-        'rounded-2xl border border-slate-800/80 bg-slate-900/50 backdrop-blur-md shadow-lg shadow-slate-950/40 transition-all duration-300 hover:border-slate-700/60 hover:shadow-xl hover:shadow-slate-950/60',
+        'rounded-2xl border border-slate-800/60 bg-gradient-to-br from-slate-900/80 to-slate-900/40 backdrop-blur-xl shadow-xl shadow-black/30 transition-all duration-300 hover:border-slate-700/80 hover:shadow-indigo-500/10',
         className
       )} 
       {...p}
@@ -67,12 +67,12 @@ export function Section({ title, right, children, className }) {
 }
 
 const BTN = {
-  primary: 'bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-sm shadow-indigo-900/30 active:scale-98',
-  brand: 'bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-400 hover:to-red-500 text-white shadow-sm active:scale-98',
-  success: 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-sm active:scale-98',
-  danger: 'bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white shadow-sm active:scale-98',
-  default: 'bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700/80 hover:border-slate-600 shadow-sm active:scale-98',
-  ghost: 'bg-transparent hover:bg-slate-800/60 text-slate-300 active:scale-98',
+  primary: 'bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 active:scale-95 ring-1 ring-white/10',
+  brand: 'bg-gradient-to-r from-orange-500 to-rose-600 hover:from-orange-400 hover:to-rose-500 text-white shadow-lg shadow-orange-500/25 hover:shadow-orange-500/40 active:scale-95 ring-1 ring-white/10',
+  success: 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 active:scale-95 ring-1 ring-white/10',
+  danger: 'bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-400 hover:to-rose-500 text-white shadow-lg shadow-red-500/25 hover:shadow-red-500/40 active:scale-95 ring-1 ring-white/10',
+  default: 'bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-500 shadow-md hover:shadow-lg active:scale-95 transition-all',
+  ghost: 'bg-transparent hover:bg-slate-800 text-slate-300 active:scale-95 hover:text-white',
 }
 
 export function Btn({ variant = 'default', size = 'md', icon: Icon, loading, className, children, onClick, ...p }) {
@@ -100,13 +100,13 @@ export function Btn({ variant = 'default', size = 'md', icon: Icon, loading, cla
 }
 
 const BADGE = {
-  gray: 'bg-slate-800/80 text-slate-300 border border-slate-700/60',
-  green: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
-  red: 'bg-red-500/10 text-red-400 border border-red-500/20',
-  yellow: 'bg-amber-500/10 text-amber-400 border border-amber-500/20',
-  blue: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
-  indigo: 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/20',
-  orange: 'bg-orange-500/10 text-orange-400 border border-orange-500/20',
+  gray: 'bg-slate-800/40 text-slate-300 border border-slate-700/60 shadow-inner',
+  green: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.1)]',
+  red: 'bg-red-500/10 text-red-400 border border-red-500/30 shadow-[0_0_10px_rgba(239,68,68,0.1)]',
+  yellow: 'bg-amber-500/10 text-amber-400 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.1)]',
+  blue: 'bg-blue-500/10 text-blue-400 border border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.1)]',
+  indigo: 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 shadow-[0_0_10px_rgba(99,102,241,0.1)]',
+  orange: 'bg-orange-500/10 text-orange-400 border border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.1)]',
 }
 
 export function Badge({ color = 'gray', className, children }) {
@@ -136,7 +136,7 @@ export function Field({ label, hint, children, right }) {
   )
 }
 
-const INPUT = 'w-full rounded-xl border border-slate-800 bg-slate-950/40 hover:border-slate-700/60 px-3.5 py-2.5 text-sm text-slate-100 outline-none transition-all duration-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 focus:shadow-[0_0_12px_rgba(99,102,241,0.15)] focus:bg-slate-950/80'
+const INPUT = 'premium-input w-full'
 
 export const Input = ({ className, ...p }) => <input className={cx(INPUT, className)} {...p} />
 export const Textarea = ({ className, ...p }) => <textarea className={cx(INPUT, 'resize-y min-h-[80px]', className)} {...p} />
