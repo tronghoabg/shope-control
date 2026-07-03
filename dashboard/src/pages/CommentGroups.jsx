@@ -39,7 +39,7 @@ export default function CommentGroups() {
   useEffect(() => { if (s?.cfg && !cfgL) setLocal(s.cfg) }, [s, cfgL])
   
   // If targets are empty, fallback to Step 2
-  const targets = cfgL?.groupIds || []
+  const targets = s?.cfg?.groupIds || []
   useEffect(() => {
     if (cfgL && targets.length === 0 && step === 2) {
       setStep(1) // Show targets step instead of queue step
