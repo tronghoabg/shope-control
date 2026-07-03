@@ -47,7 +47,7 @@ export function usePoster() {
     // Initialize results from queue
     const initialResults = ids.map(id => {
       const q = s.queue?.find(x => x.postId === id) || {}
-      return { id, name: q.groupName || q.pageName || q.groupId || id, comment: q.comment, status: 'pending' }
+      return { id, name: q.groupName || q.pageName || q.groupId || id, comment: q.comment, status: 'pending', url: q.permalink || q.link || q.url }
     })
     setResults(initialResults)
     
@@ -61,7 +61,7 @@ export function usePoster() {
       let r
       try { r = await ext({ type: 'POST_ITEM', postId: ids[i] }, 60000) } catch (e) { r = { ok: false, error: String(e?.message || e) } }
       
-      setResults(prev => prev.map(res => res.id === ids[i] ? { ...res, status: r?.ok ? 'success' : 'error', error: r?.error, url: r?.result?.result?.url || r?.result?.result?.permalink } : res))
+      setResults(prev => prev.map(res => res.id === ids[i] ? { ...res, status: r?.ok ? 'success' : 'error', error: r?.error, url: r?.result?.result?.url || r?.result?.result?.permalink || res.url } : res))
       
       if (r?.quotaBlocked) { notify('red', r.error || 'Hết hạn mức hôm nay'); break }
       if (r?.ok) ok++; else fail++
