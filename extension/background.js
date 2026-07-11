@@ -36,13 +36,16 @@ const DEFAULTS = {
 const HARD_AI_ERRORS = new Set(['AI_CAP', 'NO_SYSTEM_KEY', 'BANNED', 'RATE_LIMIT', 'TOO_LARGE', 'UNAUTHORIZED']);
 
 async function getCfg() {
-  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license', 'savedGroupLists', 'savedPosts', 'targetPages', 'savedPageLists', 'pageSearchResults']);
+  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license', 'savedGroupLists', 'savedPosts', 'targetPages', 'savedPageLists', 'pageSearchResults', 'searchCursors', 'searchKeywords', 'searchHasMore', 'pageSearchCursors', 'pageSearchKeywords', 'pageHasMore']);
   return {
     savedGroupLists: s.savedGroupLists || [],   // [{ id, name, groupIds:[], createdAt }]
     savedPosts: s.savedPosts || [],             // [{ id, title, content, link, bgPresetId, createdAt }]
     targetPages: s.targetPages || [],           // [{ pageId, name, url, icon }] — page mục tiêu comment dạo
     savedPageLists: s.savedPageLists || [],     // [{ id, name, pages:[{pageId,name,url,icon}], createdAt }]
     pageSearchResults: s.pageSearchResults || [], // [{ pageId, name, url, icon, snippet }]
+    // Phân trang tìm kiếm (để "Tải thêm"): cursor cuối theo từng từ khoá + cờ còn trang.
+    searchCursors: s.searchCursors || {}, searchKeywords: s.searchKeywords || [], searchHasMore: !!s.searchHasMore,
+    pageSearchCursors: s.pageSearchCursors || {}, pageSearchKeywords: s.pageSearchKeywords || [], pageHasMore: !!s.pageHasMore,
     progress: s.progress || { active: false, phase: '', label: '', current: 0, total: 0, updatedAt: 0 },
     cfg: { ...DEFAULTS, ...(s.cfg || {}) },
     state: { dateKey: '', doneToday: 0, nextActionAt: 0, groupIdx: 0, cursor: null, ...(s.state || {}) },
@@ -916,8 +919,9 @@ async function commitComment(item) {
       }
     }
     const res = await self.ShopeFbApi.fbPostComment(runFetchInFbTab, creds, item, item.comment);
-    commentedPosts[item.postId] = Date.now();
     if (res.ok) {
+      // Chỉ đánh dấu "đã comment" khi FB xác nhận thành công — tránh mất bài / không retry được.
+      commentedPosts[item.postId] = Date.now();
       state = { ...state, doneToday: state.doneToday + 1 };
       stats = { ...stats, totalCommented: (stats.totalCommented || 0) + 1, lastRunAt: Date.now(), lastError: '' };
       ok = true;
@@ -1037,8 +1041,20 @@ async function postToGroup(groupId, message, link, opts = {}) {
 }
 
 // ─── Một bước scheduler: chọn 1 item phù hợp rồi đăng ─────────────────────────
+// Khoá tuần tự cho MỌI thao tác đăng comment (auto tick + đăng thủ công) —
+// tránh 2 luồng cùng chọn 1 item rồi đăng 2 lần (spam → checkpoint FB).
+let _commitChain = Promise.resolve();
+function serializeCommit(fn) {
+  const p = _commitChain.then(fn, fn);
+  _commitChain = p.then(() => {}, () => {});
+  return p;
+}
+
 // manual=true (bấm "Đăng 1 comment"): bỏ qua check auto/delay, đăng item đầu hàng đợi.
-async function processOneStep(opts = {}) {
+function processOneStep(opts = {}) {
+  return serializeCommit(() => _processOneStep(opts));
+}
+async function _processOneStep(opts = {}) {
   const manual = !!opts.manual;
   let { cfg, state, stats, queue } = await getCfg();
 
@@ -1095,28 +1111,40 @@ function buildCatalogContext(catalog) {
 }
 
 // ─── PAGE: tìm page mục tiêu + comment dạo trên feed page ────────────────────
-async function searchPagesByKeyword(keyword) {
-  const { cfg } = await getCfg();
-  requireApiKey(cfg);
+async function searchPagesByKeyword(keyword, opts = {}) {
+  const more = !!opts.more;
+  const st = await getCfg();
+  requireApiKey(st.cfg);
   const creds = await ensureCreds();
   if (!creds.dtsg || !creds.uid) throw new Error('Chưa đăng nhập Facebook — hãy đăng nhập facebook.com rồi thử lại.');
-  const kws = String(keyword || '').split(',').map(s => s.trim()).filter(Boolean);
-  if (!kws.length) throw new Error('Chưa nhập từ khoá tìm page');
+
+  const kws = more ? (st.pageSearchKeywords || []) : String(keyword || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!kws.length) throw new Error(more ? 'Chưa có tìm kiếm nào để tải thêm' : 'Chưa nhập từ khoá tìm page');
+  const prevCursors = more ? (st.pageSearchCursors || {}) : {};
+  const existing = more ? (st.pageSearchResults || []) : [];
+  const existingIds = new Set(existing.map(p => p.pageId));
+
   await clearCancel();
   const byId = new Map();
+  const newCursors = { ...prevCursors };
   let firstError = null;
   for (const kw of kws) {
     if (await isCancelled()) { await pushLog('info', '■ Đã dừng tìm page.'); break; }
+    if (more && kw in prevCursors && !prevCursors[kw]) continue;
+    const cursor = more ? (prevCursors[kw] || null) : null;
     try {
-      const { pages } = await self.ShopeFbApi.fbSearchPages(runFetchInFbTab, creds, kw, null);
-      for (const p of pages) if (p.pageId && !byId.has(p.pageId)) byId.set(p.pageId, p);
-      await pushLog('info', `Tìm page "${kw}": ${pages.length} kết quả`);
+      const { pages, nextCursor } = await self.ShopeFbApi.fbSearchPages(runFetchInFbTab, creds, kw, cursor);
+      newCursors[kw] = nextCursor || null;
+      let added = 0;
+      for (const p of pages) if (p.pageId && !existingIds.has(p.pageId) && !byId.has(p.pageId)) { byId.set(p.pageId, p); added++; }
+      await pushLog('info', `Tìm page "${kw}": +${added} page mới`);
     } catch (e) { firstError = firstError || e; await pushLog('error', `Tìm page "${kw}" lỗi: ${e?.message || e}`); }
     await new Promise(r => setTimeout(r, 700 + Math.random() * 500));
   }
-  if (byId.size === 0 && firstError) throw firstError;
-  const results = [...byId.values()];
-  await save({ pageSearchResults: results });
+  if (byId.size === 0 && firstError && !existing.length) throw firstError;
+  const results = existing.concat([...byId.values()]);
+  const hasMore = Object.values(newCursors).some(c => !!c);
+  await save({ pageSearchResults: results, pageSearchKeywords: kws, pageSearchCursors: newCursors, pageHasMore: hasMore });
   return results;
 }
 
@@ -1174,6 +1202,7 @@ async function discoverGroups(opts = {}) {
   await clearCancel();
   await pushLog('info', 'Đang lấy danh sách nhóm đã tham gia…');
   await setProgress({ phase: 'discover', current: 0, total: 0, label: 'Đang lấy danh sách nhóm đã tham gia…' });
+  try {
   const creds = await getCreds();
   const groups = await self.ShopeFbApi.fbFetchJoinedGroups(runFetchInFbTab, creds, { maxPages: opts.maxPages ?? 20 });
   await pushLog('info', `Đã lấy ${groups.length} nhóm. AI bắt đầu chấm điểm theo niche…`);
@@ -1217,6 +1246,7 @@ async function discoverGroups(opts = {}) {
   await pushLog('success', `Quét nhóm xong: ${analyzed.length} nhóm, ${good} nhóm tiềm năng (điểm ≥70)`);
   await endProgress(`Quét nhóm xong: ${analyzed.length} nhóm`);
   return analyzed;
+  } catch (e) { await endProgress('Lỗi quét nhóm: ' + (e?.message || e)); throw e; }
 }
 
 // ─── Khám phá nhóm MỚI: gợi ý từ khoá → tìm → AI chấm điểm ────────────────────
@@ -1229,55 +1259,66 @@ async function suggestNiches() {
   return kw;
 }
 
-async function searchGroupsByKeyword(keyword) {
-  const { cfg, catalog } = await getCfg();
+async function searchGroupsByKeyword(keyword, opts = {}) {
+  const more = !!opts.more;
+  const st = await getCfg();
+  const { cfg, catalog } = st;
   requireApiKey(cfg);
   const creds = await ensureCreds();
-  const kws = String(keyword || '').split(',').map(s => s.trim()).filter(Boolean);
-  if (!kws.length) throw new Error('Chưa nhập từ khoá tìm nhóm');
-
   if (!creds.dtsg || !creds.uid) throw new Error('Chưa đăng nhập Facebook — hãy đăng nhập facebook.com trong trình duyệt này rồi thử lại.');
+
+  // "Tải thêm": dùng lại từ khoá + cursor của lần tìm trước; ngược lại là tìm mới.
+  const kws = more ? (st.searchKeywords || []) : String(keyword || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!kws.length) throw new Error(more ? 'Chưa có tìm kiếm nào để tải thêm' : 'Chưa nhập từ khoá tìm nhóm');
+  const prevCursors = more ? (st.searchCursors || {}) : {};
+  const existing = more ? (st.searchResults || []) : [];
+  const existingIds = new Set(existing.map(g => g.groupId));
+
   await clearCancel();
-  const joinedIds = new Set((await getCfg()).discoveredGroups.map(g => g.groupId));
-  const byId = new Map();
+  const joinedIds = new Set(st.discoveredGroups.map(g => g.groupId));
+  const byId = new Map();          // chỉ nhóm MỚI ở lần này
+  const newCursors = { ...prevCursors };
   let firstError = null;
   for (const kw of kws) {
     if (await isCancelled()) { await pushLog('info', '■ Đã dừng tìm nhóm theo yêu cầu.'); break; }
+    // Khi tải thêm: bỏ qua từ khoá đã hết trang (cursor = null nhưng đã từng tìm).
+    if (more && kw in prevCursors && !prevCursors[kw]) continue;
+    const cursor = more ? (prevCursors[kw] || null) : null;
     try {
-      const { groups } = await self.ShopeFbApi.fbSearchGroups(runFetchInFbTab, creds, kw, null);
-      for (const g of groups) if (g.groupId && !byId.has(g.groupId)) byId.set(g.groupId, { ...g, joined: g.joined || joinedIds.has(g.groupId) });
-      await pushLog('info', `Tìm "${kw}": ${groups.length} nhóm`);
+      const { groups, nextCursor } = await self.ShopeFbApi.fbSearchGroups(runFetchInFbTab, creds, kw, cursor);
+      newCursors[kw] = nextCursor || null;
+      let added = 0;
+      for (const g of groups) if (g.groupId && !existingIds.has(g.groupId) && !byId.has(g.groupId)) { byId.set(g.groupId, { ...g, joined: g.joined || joinedIds.has(g.groupId) }); added++; }
+      await pushLog('info', `Tìm "${kw}": +${added} nhóm mới`);
     } catch (e) { firstError = firstError || e; await pushLog('error', `Tìm "${kw}" lỗi: ${e?.message || e}`); }
     await new Promise(r => setTimeout(r, 700 + Math.random() * 500));   // giãn cách chống checkpoint
   }
 
   // Tất cả từ khoá đều lỗi → ném lỗi thật (không báo "đã tìm xong" giả)
-  if (byId.size === 0 && firstError) throw firstError;
+  if (byId.size === 0 && firstError && !existing.length) throw firstError;
 
-  let results = Array.from(byId.values());
-  await pushLog('info', `Tìm được ${results.length} nhóm. AI đang chấm điểm theo niche…`);
-  // AI chấm điểm theo niche/catalog (lô 15)
-  const catalogContext = buildCatalogContext(catalog);
-  const scoreById = new Map();
-  for (let i = 0; i < results.length; i += 15) {
-    if (await isCancelled()) { await pushLog('info', '■ Đã dừng chấm điểm theo yêu cầu.'); break; }
-    const chunk = results.slice(i, i + 15);
-    await setProgress({ phase: 'search', current: i, total: results.length, label: `Chấm điểm nhóm ${i + 1}–${Math.min(i + 15, results.length)}/${results.length}…` });
-    await pushLog('info', `AI chấm điểm nhóm ${i + 1}–${Math.min(i + 15, results.length)}/${results.length}…`);
-    try {
-      const rs = await self.ShopeAI.analyzeGroupsBatch(cfg, chunk, catalogContext);
-      for (const r of rs) { const g = chunk[r.i]; if (g) scoreById.set(g.groupId, { score: r.score ?? 0, niche: r.niche || '', reason: r.reason || '' }); }
-    } catch (e) { /* lô lỗi → để mặc định */ }
+  let fresh = Array.from(byId.values());
+  if (fresh.length) {
+    await pushLog('info', `Có ${fresh.length} nhóm mới. AI đang chấm điểm theo niche…`);
+    // AI chấm điểm theo niche/catalog (lô 15) — chỉ chấm nhóm MỚI.
+    const catalogContext = buildCatalogContext(catalog);
+    const scoreById = new Map();
+    for (let i = 0; i < fresh.length; i += 15) {
+      if (await isCancelled()) { await pushLog('info', '■ Đã dừng chấm điểm theo yêu cầu.'); break; }
+      const chunk = fresh.slice(i, i + 15);
+      await setProgress({ phase: 'search', current: i, total: fresh.length, label: `Chấm điểm nhóm ${i + 1}–${Math.min(i + 15, fresh.length)}/${fresh.length}…` });
+      try {
+        const rs = await self.ShopeAI.analyzeGroupsBatch(cfg, chunk, catalogContext);
+        for (const r of rs) { const g = chunk[r.i]; if (g) scoreById.set(g.groupId, { score: r.score ?? 0, niche: r.niche || '', reason: r.reason || '' }); }
+      } catch (e) { /* lô lỗi → để mặc định */ }
+    }
+    fresh = fresh.map(g => ({ ...g, score: scoreById.get(g.groupId)?.score ?? null, niche: scoreById.get(g.groupId)?.niche ?? '', reason: scoreById.get(g.groupId)?.reason ?? '' }));
   }
-  results = results.map(g => ({
-    ...g,
-    score: scoreById.get(g.groupId)?.score ?? null,
-    niche: scoreById.get(g.groupId)?.niche ?? '',
-    reason: scoreById.get(g.groupId)?.reason ?? '',
-  })).sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
 
-  await save({ searchResults: results, searchAt: Date.now() });
-  await pushLog('info', `Tìm nhóm "${keyword}": ${results.length} kết quả`);
+  const results = existing.concat(fresh).sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+  const hasMore = Object.values(newCursors).some(c => !!c);
+  await save({ searchResults: results, searchAt: Date.now(), searchKeywords: kws, searchCursors: newCursors, searchHasMore: hasMore });
+  await pushLog('info', `Tìm nhóm: ${results.length} kết quả${hasMore ? ' (còn nữa — bấm Tải thêm)' : ''}`);
   await endProgress(`Tìm nhóm xong: ${results.length} kết quả`);
   return results;
 }
@@ -1444,8 +1485,8 @@ async function handle(request, sendResponse) {
       }
       case 'DISCOVER_GROUPS': { const g = await discoverGroups(request.opts || {}); sendResponse({ ok: true, count: g.length, groups: g }); break; }
       case 'SUGGEST_NICHES': { const kw = await suggestNiches(); sendResponse({ ok: true, keywords: kw }); break; }
-      case 'SEARCH_GROUPS': { const r = await searchGroupsByKeyword(request.keyword); sendResponse({ ok: true, count: r.length, groups: r }); break; }
-      case 'SEARCH_PAGES': { const r = await searchPagesByKeyword(request.keyword); sendResponse({ ok: true, count: r.length, pages: r }); break; }
+      case 'SEARCH_GROUPS': { const r = await searchGroupsByKeyword(request.keyword, { more: !!request.more }); sendResponse({ ok: true, count: r.length, groups: r }); break; }
+      case 'SEARCH_PAGES': { const r = await searchPagesByKeyword(request.keyword, { more: !!request.more }); sendResponse({ ok: true, count: r.length, pages: r }); break; }
       case 'SET_TARGET_PAGES': {
         const pages = (request.pages || []).map(p => ({ pageId: String(p.pageId), name: p.name || '', url: p.url || '', icon: p.icon || '' }));
         await save({ targetPages: pages });
@@ -1626,12 +1667,20 @@ async function handle(request, sendResponse) {
       case 'REJECT_ITEM': await mutateQueue(q => q.filter(it => it.postId !== request.postId)); sendResponse({ ok: true }); break;
       case 'EDIT_ITEM': await mutateQueue(q => q.map(it => it.postId === request.postId ? { ...it, comment: request.comment } : it)); sendResponse({ ok: true }); break;
       case 'POST_ITEM': {
-        const { queue } = await getCfg();
-        const item = queue.find(it => it.postId === request.postId);
-        if (!item) { sendResponse({ ok: false, error: 'không thấy item' }); break; }
-        await save({ queue: queue.filter(it => it.postId !== request.postId) });
-        const r = await commitComment(item);
-        sendResponse({ ok: r.ok, error: r.error, result: r });
+        const r = await serializeCommit(async () => {
+          const { queue } = await getCfg();
+          const item = queue.find(it => it.postId === request.postId);
+          if (!item) return { ok: false, error: 'không thấy item' };
+          await save({ queue: queue.filter(it => it.postId !== request.postId) });
+          const res = await commitComment(item);
+          // Chưa đăng được (hết hạn mức, lỗi FB…) → trả item lại hàng đợi để không mất bài đã duyệt.
+          if (!res.ok) {
+            const { queue: q2 } = await getCfg();
+            if (!q2.some(it => it.postId === item.postId)) await save({ queue: [item, ...q2] });
+          }
+          return res;
+        });
+        sendResponse({ ok: r.ok, error: r.error, quotaBlocked: !!r.quotaBlocked, result: r });
         break;
       }
       case 'MAKE_LINKS': {

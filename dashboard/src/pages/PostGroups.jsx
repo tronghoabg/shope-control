@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { 
   IconSend, IconPlayerPlay, IconPlayerStop, IconTarget, IconExternalLink, IconCheck, IconX, 
   IconWand, IconRefresh, IconPhoto, IconPalette, IconSparkles, IconTrash, IconBookmark,
-  IconClock, IconMessageCircle, IconShare3, IconThumbUp
+  IconClock, IconMessageCircle, IconShare3, IconThumbUp, IconUserCircle
 } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'

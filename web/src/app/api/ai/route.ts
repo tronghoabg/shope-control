@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { CORS } from '@/lib/apiAuth'
-import { guardManaged, callProviderManaged, recordAiUsage } from '@/lib/aiServer'
+import { guardManaged, callProviderManaged, recordAiTokens, refundAiCall } from '@/lib/aiServer'
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS })
@@ -26,9 +26,10 @@ export async function POST(req: Request) {
 
   try {
     const { text, tokens } = await callProviderManaged(guard.cfg, opts)
-    await recordAiUsage(guard.userId, tokens)
+    await recordAiTokens(guard.userId, tokens)
     return NextResponse.json({ text, provider: guard.cfg.provider, model: guard.cfg.model }, { headers: CORS })
   } catch (e: any) {
+    await refundAiCall(guard.userId)   // provider lỗi → hoàn lại lượt đã giữ chỗ
     return NextResponse.json({ error: 'AI lỗi: ' + (e?.message || 'unknown'), code: 'PROVIDER_ERROR' }, { status: 502, headers: CORS })
   }
 }

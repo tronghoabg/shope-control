@@ -311,8 +311,7 @@ async function fbPostComment(runFetch, creds, item, message) {
   };
   const json = await gql(runFetch, creds, COMMENT.FRIENDLY_NAME, COMMENT.DOC_ID, vars);
   const ok = !!(json?.data?.comment_create?.feedback_comment_edge?.node?.id
-    || json?.data?.comment_create?.comment_edge?.node?.id
-    || json?.data?.comment_create);
+    || json?.data?.comment_create?.comment_edge?.node?.id);
   return { ok, raw: json?.data || null, errors: json?.errors || null };
 }
 

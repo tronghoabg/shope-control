@@ -31,15 +31,37 @@ export async function aiUsedToday(userId: string): Promise<number> {
   return u?.aiCalls ?? 0
 }
 
-// Ghi nhận 1 lượt gọi AI + token (ngày + tổng đời).
-export async function recordAiUsage(userId: string, tokens: number) {
+// GIỮ CHỖ 1 lượt AI theo cách NGUYÊN TỬ (chống đua/TOCTOU vượt trần).
+// Increment trước rồi so với cap trên giá trị TRẢ VỀ: các request song song nhận
+// giá trị khác nhau nên chỉ đúng `cap` request đầu tiên lọt, phần dư bị hoàn lại.
+export async function reserveAiCall(userId: string, cap: number): Promise<boolean> {
   const date = vnDateKey()
-  await prisma.dailyUsage.upsert({
+  const row = await prisma.dailyUsage.upsert({
     where: { userId_date: { userId, date } },
-    create: { userId, date, aiCalls: 1, aiTokens: tokens },
-    update: { aiCalls: { increment: 1 }, aiTokens: { increment: tokens } },
+    create: { userId, date, aiCalls: 1, aiTokens: 0 },
+    update: { aiCalls: { increment: 1 } },
   })
-  await prisma.user.update({ where: { id: userId }, data: { aiCallsTotal: { increment: 1 }, aiTokensTotal: { increment: tokens } } }).catch(() => {})
+  if (row.aiCalls > cap) {
+    await prisma.dailyUsage.update({ where: { userId_date: { userId, date } }, data: { aiCalls: { decrement: 1 } } }).catch(() => {})
+    return false
+  }
+  await prisma.user.update({ where: { id: userId }, data: { aiCallsTotal: { increment: 1 } } }).catch(() => {})
+  return true
+}
+
+// Hoàn lại lượt đã giữ chỗ khi provider lỗi (không tính phí cho lần gọi thất bại).
+export async function refundAiCall(userId: string) {
+  const date = vnDateKey()
+  await prisma.dailyUsage.update({ where: { userId_date: { userId, date } }, data: { aiCalls: { decrement: 1 } } }).catch(() => {})
+  await prisma.user.update({ where: { id: userId }, data: { aiCallsTotal: { decrement: 1 } } }).catch(() => {})
+}
+
+// Ghi nhận token thực tế SAU khi provider trả kết quả (lượt gọi đã được giữ chỗ trước đó).
+export async function recordAiTokens(userId: string, tokens: number) {
+  if (!tokens) return
+  const date = vnDateKey()
+  await prisma.dailyUsage.update({ where: { userId_date: { userId, date } }, data: { aiTokens: { increment: tokens } } }).catch(() => {})
+  await prisma.user.update({ where: { id: userId }, data: { aiTokensTotal: { increment: tokens } } }).catch(() => {})
 }
 
 export interface AiOpts {
@@ -126,9 +148,10 @@ export async function guardManaged(req: Request, opts: { system?: string; messag
   if (inputCharCount(opts) > MAX_INPUT_CHARS) return { ok: false, status: 413, error: 'Nội dung quá dài.', code: 'TOO_LARGE' }
   const plan = await getActivePlan(user.id)
   const cap = PLANS[plan].aiDailyCap
-  const used = await aiUsedToday(user.id)
-  if (used >= cap) return { ok: false, status: 429, error: `Đã đạt trần ${cap} lượt AI/ngày của gói. Nâng cấp để dùng tiếp.`, code: 'AI_CAP' }
   const cfg = await getAiConfig()
   if (!cfg.key) return { ok: false, status: 503, error: 'AI hệ thống chưa được cấu hình. Vào /admin để nhập API key.', code: 'NO_SYSTEM_KEY' }
+  // Giữ chỗ NGUYÊN TỬ sau khi đã chắc chắn sẽ gọi provider (chống vượt trần khi nhiều request song song).
+  if (!(await reserveAiCall(user.id, cap)))
+    return { ok: false, status: 429, error: `Đã đạt trần ${cap} lượt AI/ngày của gói. Nâng cấp để dùng tiếp.`, code: 'AI_CAP' }
   return { ok: true, cfg, userId: user.id }
 }

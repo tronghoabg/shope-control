@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import {
   IconSparkles, IconSearch, IconPlus, IconCheck, IconExternalLink, IconCompass,
-  IconStarFilled, IconUsersPlus, IconPlayerStop, IconTarget, IconUsers
+  IconStarFilled, IconUsersPlus, IconPlayerStop, IconTarget, IconUsers, IconChevronDown
 } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { Section, Btn, Badge, Input, Card, Empty, Spinner, Hint } from '../ui.jsx'
@@ -26,6 +26,7 @@ export default function Discover() {
   const [suggested, setSuggested] = useState([])
   const [suggesting, setSuggesting] = useState(false)
   const [searching, setSearching] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [selected, setSelected] = useState(new Set())
   const [joiningId, setJoiningId] = useState(null)
   const [bulk, setBulk] = useState(null)   // { done, total, current } khi đang join hàng loạt
@@ -51,6 +52,11 @@ export default function Discover() {
     setKeyword(q); setSearching(true); setSelected(new Set())
     await call({ type: 'SEARCH_GROUPS', keyword: q }, { okMsg: 'Đã tìm xong', errMsg: 'Tìm nhóm lỗi', timeout: 180000 })
     setSearching(false)
+  }
+  const loadMore = async () => {
+    setLoadingMore(true)
+    await call({ type: 'SEARCH_GROUPS', more: true }, { errMsg: 'Tải thêm lỗi', timeout: 180000 })
+    setLoadingMore(false)
   }
   const join = async (g) => {
     setJoiningId(g.groupId)
@@ -252,6 +258,14 @@ export default function Discover() {
                 </div>
               )
             })}
+            {s?.searchHasMore && (
+              <div className="p-4 flex justify-center bg-slate-900/10">
+                <Btn variant="ghost" icon={IconChevronDown} loading={loadingMore} disabled={!!bulk} onClick={loadMore}
+                  className="border border-slate-800 hover:bg-slate-900/60">
+                  Tải thêm kết quả
+                </Btn>
+              </div>
+            )}
           </div>
         )}
       </Card>

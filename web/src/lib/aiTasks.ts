@@ -103,10 +103,10 @@ Chỉ trả JSON: {"productId": string|null, "comment": string|null, "score": 0-
         productId: product?.id ?? null,
         link: product?.link ?? null,
         productName: product?.name ?? null,
-        comment: ai?.comment && product ? String(ai.comment).replace(/\{\{LINK\}\}/g, product.link) : (ai?.comment ?? null),
+        comment: ai?.comment && product?.link ? String(ai.comment).replace(/\{\{LINK\}\}/g, product.link) : (ai?.comment ?? null),
         score: ai?.score ?? 0,
         reason: ai?.reason ?? '',
-        skip: ai?.skip || !product,
+        skip: ai?.skip || !product?.link,
       }
     },
   },

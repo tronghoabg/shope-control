@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { IconBuildingStore, IconSearch, IconExternalLink, IconTarget, IconX, IconPlayerStop, IconBookmark, IconTrash, IconListCheck } from '@tabler/icons-react'
+import { IconBuildingStore, IconSearch, IconExternalLink, IconTarget, IconX, IconPlayerStop, IconBookmark, IconTrash, IconListCheck, IconChevronDown } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
 import { Card, Btn, Empty, Hint, Input, Section } from '../ui.jsx'
@@ -8,6 +8,7 @@ export default function Pages({ goto }) {
   const { s, aiReady, call, notify } = useShope()
   const [keyword, setKeyword] = useState('')
   const [searching, setSearching] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [listName, setListName] = useState('')
   if (!s) return <p className="text-slate-500">Đang tải danh sách Fanpage…</p>
 
@@ -29,6 +30,11 @@ export default function Pages({ goto }) {
     setKeyword(q); setSearching(true)
     await call({ type: 'SEARCH_PAGES', keyword: q }, { okMsg: 'Đã tìm xong', errMsg: 'Tìm page lỗi', timeout: 120000 })
     setSearching(false)
+  }
+  const loadMore = async () => {
+    setLoadingMore(true)
+    await call({ type: 'SEARCH_PAGES', more: true }, { errMsg: 'Tải thêm lỗi', timeout: 120000 })
+    setLoadingMore(false)
   }
 
   const saveList = async () => {
@@ -147,6 +153,14 @@ export default function Pages({ goto }) {
                 </div>
               </div>
             ))}
+            {s.pageHasMore && (
+              <div className="p-4 flex justify-center bg-slate-900/10">
+                <Btn variant="ghost" icon={IconChevronDown} loading={loadingMore} onClick={loadMore}
+                  className="border border-slate-800 hover:bg-slate-900/60">
+                  Tải thêm kết quả
+                </Btn>
+              </div>
+            )}
           </div>
         )}
       </Card>
