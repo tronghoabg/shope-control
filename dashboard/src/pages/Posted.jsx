@@ -40,7 +40,7 @@ function Item({ h }) {
 }
 
 export default function Posted() {
-  const { s, call, account } = useShope()
+  const { s, call, account, confirm } = useShope()
   const local = s?.commentHistory || []
   const [db, setDb] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -66,7 +66,7 @@ export default function Posted() {
     .filter(h => !qq || (h.content || h.comment || '').toLowerCase().includes(qq) || (h.groupName || '').toLowerCase().includes(qq) || (h.productName || '').toLowerCase().includes(qq))
 
   const clear = async () => {
-    if (!window.confirm('Xoá TOÀN BỘ lịch sử rải tin? Không thể hoàn tác.')) return
+    if (!(await confirm('Xoá TOÀN BỘ lịch sử rải tin? Không thể hoàn tác.', { danger: true, confirmText: 'Xoá tất cả' }))) return
     if (fromDb) { await fetch('/api/posted', { method: 'DELETE', credentials: 'include' }).catch(() => {}); setDb([]) }
     call({ type: 'CLEAR_POSTED' })
   }

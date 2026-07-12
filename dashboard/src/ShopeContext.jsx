@@ -25,6 +25,15 @@ export function ShopeProvider({ children }) {
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500)
   }, [])
 
+  // Hộp thoại xác nhận / nhập liệu theo dark theme (thay window.confirm/prompt).
+  const [dialog, setDialog] = useState(null)
+  const confirm = useCallback((message, opts = {}) => new Promise(resolve => {
+    setDialog({ kind: 'confirm', message, title: opts.title || 'Xác nhận', confirmText: opts.confirmText, danger: opts.danger, resolve })
+  }), [])
+  const prompt = useCallback((message, defaultValue = '', opts = {}) => new Promise(resolve => {
+    setDialog({ kind: 'prompt', message, title: opts.title || 'Nhập thông tin', defaultValue, confirmText: opts.confirmText, resolve })
+  }), [])
+
   const refresh = useCallback(async () => {
     if (typeof window !== 'undefined' && window.location.search.includes('promo=1')) {
       setConnected(true)
@@ -150,8 +159,36 @@ export function ShopeProvider({ children }) {
   // AI do hệ thống cung cấp → chỉ cần đăng nhập tài khoản là dùng được (không còn API key riêng).
   const aiReady = !!account?.loggedIn || (typeof window !== 'undefined' && window.location.search.includes('promo=1'))
 
-  const value = { s, connected, aiReady, account: account || (typeof window !== 'undefined' && window.location.search.includes('promo=1') ? { loggedIn: true, profile: { name: 'Promo Account', email: 'promo@toolmktai.com' } } : null), refresh, refreshAccount, connectFb, call, setCfg, notify, toasts }
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+  const value = { s, connected, aiReady, account: account || (typeof window !== 'undefined' && window.location.search.includes('promo=1') ? { loggedIn: true, profile: { name: 'Promo Account', email: 'promo@toolmktai.com' } } : null), refresh, refreshAccount, connectFb, call, setCfg, notify, toasts, confirm, prompt }
+  return <Ctx.Provider value={value}>{children}<DialogHost dialog={dialog} onClose={() => setDialog(null)} /></Ctx.Provider>
+}
+
+function DialogHost({ dialog, onClose }) {
+  const [val, setVal] = useState('')
+  useEffect(() => { setVal(dialog?.defaultValue || '') }, [dialog])
+  if (!dialog) return null
+  const isPrompt = dialog.kind === 'prompt'
+  const close = (result) => { dialog.resolve(result); onClose() }
+  const cancel = () => close(isPrompt ? null : false)
+  const ok = () => close(isPrompt ? val : true)
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-fadeIn" onClick={cancel}>
+      <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow-2xl shadow-black/50" onClick={e => e.stopPropagation()}>
+        <h3 className={`text-sm font-bold ${dialog.danger ? 'text-red-300' : 'text-slate-100'}`}>{dialog.title}</h3>
+        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">{dialog.message}</p>
+        {isPrompt && (
+          <input autoFocus value={val} onChange={e => setVal(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') ok(); if (e.key === 'Escape') cancel() }}
+            className="mt-3 w-full rounded-xl border border-slate-800 bg-slate-950/60 px-3.5 py-2.5 text-sm text-slate-100 outline-none focus:border-indigo-500" />
+        )}
+        <div className="mt-5 flex justify-end gap-2.5">
+          <button onClick={cancel} className="rounded-xl px-4 py-2 text-xs font-semibold text-slate-400 hover:bg-slate-800 transition-colors">Hủy</button>
+          <button onClick={ok} className={`rounded-xl px-4 py-2 text-xs font-bold text-white transition-colors ${dialog.danger ? 'bg-red-600 hover:bg-red-500' : 'bg-indigo-600 hover:bg-indigo-500'}`}>
+            {dialog.confirmText || (isPrompt ? 'Lưu' : 'Xác nhận')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function Toaster() {

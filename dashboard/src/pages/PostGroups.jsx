@@ -35,7 +35,7 @@ const BG_PRESETS = [
 ]
 
 export default function PostGroups() {
-  const { s, aiReady, notify, refresh, account } = useShope()
+  const { s, aiReady, notify, refresh, account, confirm } = useShope()
   const [content, setContent] = useState('')
   const [link, setLink] = useState('')
   const [images, setImages] = useState([])   // [{ name, url(dataURL) }]
@@ -53,7 +53,11 @@ export default function PostGroups() {
   const [wait, setWait] = useState(0)
   const stopRef = useRef(false)
   const skipWaitRef = useRef(false)   // bỏ chờ delay → đăng nhóm kế tiếp ngay
+  const pausedRef = useRef(false)
+  const [paused, setPaused] = useState(false)
   const fileRef = useRef(null)
+  const pauseRun = () => { pausedRef.current = true; setPaused(true) }
+  const resumeRun = () => { pausedRef.current = false; setPaused(false) }
 
   // Cảnh báo khi rời/tải lại trang lúc đang đăng (vòng lặp chạy trong tab, đóng tab là dừng).
   useEffect(() => {
@@ -77,7 +81,9 @@ export default function PostGroups() {
   const variants = content.split(/\n=+\s*\n/).map(v => v.trim()).filter(Boolean)
   const hasVar = variants.length > 1
   const hasSpin = /\{[^{}]*\|[^{}]*\}/.test(content)
-  const preview = spin(variants[0] || content)
+  const [pvSeed, setPvSeed] = useState(0)
+  // Ổn định preview (chỉ đổi khi sửa nội dung hoặc bấm "Đổi biến thể") + xoay vòng các biến thể.
+  const preview = useMemo(() => spin(variants[pvSeed % Math.max(1, variants.length)] || content), [content, pvSeed]) // eslint-disable-line react-hooks/exhaustive-deps
   const bgDisabled = images.length > 0 || !!link.trim()
   const activeBg = !bgDisabled ? BG_PRESETS.find(b => b.id === bg) : null
   const shownPool = gFilter.trim() ? pool.filter(g => (g.name || '').toLowerCase().includes(gFilter.trim().toLowerCase())) : pool
@@ -114,7 +120,7 @@ export default function PostGroups() {
   const newPost = () => { setEditingId(''); setContent(''); setLink(''); setBg(''); notify('blue', 'Đã tạo bài mới') }
   const delSaved = async () => {
     if (!editingPost) return
-    if (!window.confirm(`Xoá bài mẫu "${editingPost.title}"?`)) return
+    if (!(await confirm(`Xoá bài mẫu "${editingPost.title}"?`, { danger: true, confirmText: 'Xoá' }))) return
     await ext({ type: 'DELETE_POST', id: editingPost.id })
     setEditingId(''); refresh(); notify('green', 'Đã xoá bài mẫu')
   }
@@ -127,7 +133,7 @@ export default function PostGroups() {
     const loS = Math.max(MIN_DELAY, Math.min(dMin, dMax)), hiS = Math.max(loS, Math.max(dMin, dMax))
     const avg = (loS + hiS) / 2
     const estMin = Math.round(((ids.length - 1) * avg + ids.length * 8) / 60)
-    if (!window.confirm(`Đăng bài lên ${ids.length} nhóm · giãn cách ${loS}–${hiS}s/bài · ước tính ~${estMin} phút.\n\nBài đăng là thật và không thể thu hồi tự động. Tiếp tục?`)) return
+    if (!(await confirm(`Đăng bài lên ${ids.length} nhóm · giãn cách ${loS}–${hiS}s/bài · ước tính ~${estMin} phút.\n\nBài đăng là thật và không thể thu hồi tự động. Tiếp tục?`, { title: 'Xác nhận đăng bài', confirmText: 'Đăng ngay' }))) return
     if (randomize) shuffle(ids)
     let bag = []
     const pickVar = () => {
@@ -137,10 +143,12 @@ export default function PostGroups() {
     }
     const imgUrls = images.map(im => im.url)
 
-    setRunning(true); stopRef.current = false
+    setRunning(true); stopRef.current = false; pausedRef.current = false; setPaused(false)
     setResults(ids.map(id => ({ id, name: nameMap[id] || id, status: 'pending' })))
     let ok = 0, fail = 0, consec = 0, stoppedMsg = ''
     for (let i = 0; i < ids.length; i++) {
+      if (stopRef.current) break
+      while (pausedRef.current && !stopRef.current) await sleep(300)   // tạm dừng
       if (stopRef.current) break
       const id = ids[i]
       setResults(rs => rs.map(r => r.id === id ? { ...r, status: 'posting' } : r))
@@ -172,11 +180,15 @@ export default function PostGroups() {
         const lo = Math.max(MIN_DELAY, Math.min(dMin, dMax)), hi = Math.max(lo, Math.max(dMin, dMax))
         let secs = lo + Math.floor(Math.random() * (hi - lo + 1))
         skipWaitRef.current = false
-        for (; secs > 0 && !stopRef.current && !skipWaitRef.current; secs--) { setWait(secs); await sleep(1000) }
+        for (; secs > 0 && !stopRef.current && !skipWaitRef.current; secs--) {
+          while (pausedRef.current && !stopRef.current) await sleep(300)
+          if (stopRef.current) break
+          setWait(secs); await sleep(1000)
+        }
         setWait(0)
       }
     }
-    setRunning(false); setWait(0)
+    setRunning(false); setWait(0); pausedRef.current = false; setPaused(false)
     if (!stoppedMsg) notify(fail ? 'blue' : 'green', `Hoàn tất: ${ok} thành công, ${fail} lỗi`)
   }
   const stop = () => { stopRef.current = true; notify('blue', 'Đang dừng chiến dịch sau bài hiện tại…') }
@@ -301,8 +313,14 @@ export default function PostGroups() {
         <div className="lg:col-span-2 space-y-6">
           {/* Real Facebook Post Preview */}
           <Card className="overflow-hidden border border-slate-800/80 bg-[#18191a] shadow-xl text-slate-200">
-            <div className="flex items-center gap-2 border-b border-slate-850 px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-900/30">
-              <IconWand size={13} className="text-indigo-400" /> Xem trước định dạng Facebook
+            <div className="flex items-center justify-between gap-2 border-b border-slate-850 px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-slate-900/30">
+              <span className="flex items-center gap-2"><IconWand size={13} className="text-indigo-400" /> Xem trước định dạng Facebook</span>
+              {(hasVar || hasSpin) && (
+                <button onClick={() => setPvSeed(s => s + 1)} title="Xem một biến thể ngẫu nhiên khác"
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-700/60 bg-slate-800/40 px-2 py-1 text-[9px] font-bold normal-case text-slate-300 hover:bg-slate-800 transition-colors">
+                  <IconRefresh size={11} /> Đổi biến thể{hasVar ? ` (${(pvSeed % variants.length) + 1}/${variants.length})` : ''}
+                </button>
+              )}
             </div>
             
             {/* Header Facebook Post */}
@@ -409,9 +427,15 @@ export default function PostGroups() {
               <div className="flex flex-wrap items-center justify-between text-sm gap-2">
                 <span className="font-bold text-slate-200">Tiến trình đăng bài ({done} / {results.length} nhóm)</span>
                 <span className="flex items-center gap-2 text-xs font-semibold text-slate-405 font-mono">
-                  {running ? (wait ? `Đang nghỉ trễ ${wait} giây…` : 'Đang xử lý đăng…') : 'Đã hoàn thành'}
-                  {running && wait > 0 && (
+                  {running ? (paused ? 'Đã tạm dừng' : wait ? `Đang nghỉ trễ ${wait} giây…` : 'Đang xử lý đăng…') : 'Đã hoàn thành'}
+                  {running && wait > 0 && !paused && (
                     <button onClick={() => { skipWaitRef.current = true }} className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-300 hover:bg-indigo-500/20 transition-colors">Bỏ chờ</button>
+                  )}
+                  {running && (
+                    <button onClick={paused ? resumeRun : pauseRun}
+                      className={`rounded-md border px-2 py-0.5 text-[10px] font-bold transition-colors ${paused ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20' : 'border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'}`}>
+                      {paused ? '▶ Tiếp tục' : '⏸ Tạm dừng'}
+                    </button>
                   )}
                 </span>
               </div>

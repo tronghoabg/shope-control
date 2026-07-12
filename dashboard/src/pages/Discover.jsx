@@ -21,7 +21,7 @@ function fmtMembers(n) {
 }
 
 export default function Discover() {
-  const { s, aiReady, call, notify, account, refresh } = useShope()
+  const { s, aiReady, call, notify, account, refresh, confirm } = useShope()
   const [keyword, setKeyword] = useState('')
   const [suggested, setSuggested] = useState([])
   const [suggesting, setSuggesting] = useState(false)
@@ -73,7 +73,7 @@ export default function Discover() {
   const bulkJoin = async () => {
     const targets = joinable.filter(g => selected.has(g.groupId))
     if (!targets.length) return notify('red', 'Chưa chọn nhóm nào')
-    if (targets.length > 20 && !confirm(`Tham gia liên tục ${targets.length} nhóm dễ bị checkpoint Facebook. Bạn chắc chắn muốn tiếp tục?`)) return
+    if (targets.length > 20 && !(await confirm(`Tham gia liên tục ${targets.length} nhóm dễ bị checkpoint Facebook. Bạn chắc chắn muốn tiếp tục?`, { confirmText: 'Tiếp tục' }))) return
     stopRef.current = false
     setBulk({ done: 0, total: targets.length, current: '' })
     let ok = 0, fail = 0, consec = 0, stopped = ''

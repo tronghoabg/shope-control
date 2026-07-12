@@ -4,7 +4,7 @@ import { useShope } from '../ShopeContext.jsx'
 import { Section, Btn, Card, Badge, Empty, Hint, Input, Textarea, Field } from '../ui.jsx'
 
 export default function Saved() {
-  const { s, call, notify } = useShope()
+  const { s, call, notify, confirm, prompt } = useShope()
   const [name, setName] = useState('')
   const [q, setQ] = useState('')
   const [editPost, setEditPost] = useState(null)   // { id, title, content, link }
@@ -26,12 +26,12 @@ export default function Saved() {
     setName('')
   }
   const apply = (l) => call({ type: 'SET_TARGETS', groupIds: l.groupIds }, { okMsg: `Đã áp dụng "${l.name}" (${l.groupIds.length} nhóm)` })
-  const delList = (l) => { if (window.confirm(`Xoá preset nhóm "${l.name}"?`)) call({ type: 'DELETE_GROUP_LIST', id: l.id }, { okMsg: 'Đã xoá danh sách' }) }
-  const renameList = (l) => { const n = window.prompt('Đổi tên preset nhóm:', l.name); if (n && n.trim() && n.trim() !== l.name) call({ type: 'RENAME_GROUP_LIST', id: l.id, name: n.trim() }, { okMsg: 'Đã đổi tên' }) }
+  const delList = async (l) => { if (await confirm(`Xoá preset nhóm "${l.name}"?`, { danger: true, confirmText: 'Xoá' })) call({ type: 'DELETE_GROUP_LIST', id: l.id }, { okMsg: 'Đã xoá danh sách' }) }
+  const renameList = async (l) => { const n = await prompt('Đổi tên preset nhóm:', l.name, { title: 'Đổi tên' }); if (n && n.trim() && n.trim() !== l.name) call({ type: 'RENAME_GROUP_LIST', id: l.id, name: n.trim() }, { okMsg: 'Đã đổi tên' }) }
   const applyPages = (l) => call({ type: 'SET_TARGET_PAGES', pages: l.pages }, { okMsg: `Đã áp dụng "${l.name}" (${l.pages.length} page)` })
-  const delPageList = (l) => { if (window.confirm(`Xoá preset page "${l.name}"?`)) call({ type: 'DELETE_PAGE_LIST', id: l.id }, { okMsg: 'Đã xoá danh sách page' }) }
-  const renamePageList = (l) => { const n = window.prompt('Đổi tên preset page:', l.name); if (n && n.trim() && n.trim() !== l.name) call({ type: 'RENAME_PAGE_LIST', id: l.id, name: n.trim() }, { okMsg: 'Đã đổi tên' }) }
-  const delPost = (p) => { if (window.confirm(`Xoá bài mẫu "${p.title || 'này'}"?`)) call({ type: 'DELETE_POST', id: p.id }, { okMsg: 'Đã xoá bài' }) }
+  const delPageList = async (l) => { if (await confirm(`Xoá preset page "${l.name}"?`, { danger: true, confirmText: 'Xoá' })) call({ type: 'DELETE_PAGE_LIST', id: l.id }, { okMsg: 'Đã xoá danh sách page' }) }
+  const renamePageList = async (l) => { const n = await prompt('Đổi tên preset page:', l.name, { title: 'Đổi tên' }); if (n && n.trim() && n.trim() !== l.name) call({ type: 'RENAME_PAGE_LIST', id: l.id, name: n.trim() }, { okMsg: 'Đã đổi tên' }) }
+  const delPost = async (p) => { if (await confirm(`Xoá bài mẫu "${p.title || 'này'}"?`, { danger: true, confirmText: 'Xoá' })) call({ type: 'DELETE_POST', id: p.id }, { okMsg: 'Đã xoá bài' }) }
   const savePostEdit = async () => {
     if (!editPost.content.trim()) return notify('red', 'Nội dung bài không được để trống')
     const r = await call({ type: 'SAVE_POST', post: { id: editPost.id, title: editPost.title, content: editPost.content, link: editPost.link } }, { okMsg: 'Đã cập nhật bài mẫu' })

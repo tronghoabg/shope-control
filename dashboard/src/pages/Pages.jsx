@@ -5,7 +5,7 @@ import { ext } from '../ext.js'
 import { Card, Btn, Empty, Hint, Input, Section } from '../ui.jsx'
 
 export default function Pages({ goto }) {
-  const { s, aiReady, call, notify } = useShope()
+  const { s, aiReady, call, notify, confirm, prompt } = useShope()
   const [keyword, setKeyword] = useState('')
   const [searching, setSearching] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -44,8 +44,8 @@ export default function Pages({ goto }) {
     setListName('')
   }
   const applyList = (l) => call({ type: 'SET_TARGET_PAGES', pages: l.pages }, { okMsg: `Đã chọn "${l.name}" (${l.pages.length} page)` })
-  const deleteList = (l) => { if (window.confirm(`Xoá danh sách "${l.name}"?`)) call({ type: 'DELETE_PAGE_LIST', id: l.id }, { okMsg: 'Đã xoá' }) }
-  const renameList = (l) => { const n = window.prompt('Đổi tên preset page:', l.name); if (n && n.trim() && n.trim() !== l.name) call({ type: 'RENAME_PAGE_LIST', id: l.id, name: n.trim() }, { okMsg: 'Đã đổi tên' }) }
+  const deleteList = async (l) => { if (await confirm(`Xoá danh sách "${l.name}"?`, { danger: true, confirmText: 'Xoá' })) call({ type: 'DELETE_PAGE_LIST', id: l.id }, { okMsg: 'Đã xoá' }) }
+  const renameList = async (l) => { const n = await prompt('Đổi tên preset page:', l.name, { title: 'Đổi tên' }); if (n && n.trim() && n.trim() !== l.name) call({ type: 'RENAME_PAGE_LIST', id: l.id, name: n.trim() }, { okMsg: 'Đã đổi tên' }) }
   const activeList = (l) => l.pages.length > 0 && l.pages.length === targets.length && l.pages.every(p => targetIds.has(p.pageId))
 
   return (

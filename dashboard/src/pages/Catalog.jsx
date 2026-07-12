@@ -10,7 +10,7 @@ sp002,Áo thun nam form rộng,"áo thun,áo nam,thời trang",Thời trang,1290
 const BLANK = { id: '', name: '', category: '', price: '', keywords: '', link: '' }
 
 export default function Catalog() {
-  const { s, call, notify } = useShope()
+  const { s, call, notify, confirm } = useShope()
   const [csv, setCsv] = useState('')
   const [showImport, setShowImport] = useState(false)
   const [q, setQ] = useState('')
@@ -37,8 +37,12 @@ export default function Catalog() {
       { okMsg: it._new ? 'Đã thêm sản phẩm' : 'Đã cập nhật sản phẩm', errMsg: 'Lưu sản phẩm lỗi' })
     if (r?.ok) setEditing(null)
   }
-  const del = (p) => { if (window.confirm(`Xoá sản phẩm "${p.name || p.id}"?`)) call({ type: 'DELETE_CATALOG_ITEM', id: p.id }, { okMsg: 'Đã xoá sản phẩm' }) }
-  const clearAll = () => { if (window.confirm(`Xoá TOÀN BỘ ${catalog.length} sản phẩm trong catalog? Không thể hoàn tác.`)) call({ type: 'CLEAR_CATALOG' }, { okMsg: 'Đã xoá toàn bộ catalog' }) }
+  const doImport = async () => {
+    if (catalog.length > 0 && !(await confirm(`Nhập CSV sẽ GHI ĐÈ toàn bộ ${catalog.length} sản phẩm hiện có. Tiếp tục?`, { danger: true, confirmText: 'Ghi đè' }))) return
+    call({ type: 'IMPORT_CSV', csv }, { okMsg: 'Đã nhập danh sách sản phẩm (ghi đè catalog cũ)' })
+  }
+  const del = async (p) => { if (await confirm(`Xoá sản phẩm "${p.name || p.id}"?`, { danger: true, confirmText: 'Xoá' })) call({ type: 'DELETE_CATALOG_ITEM', id: p.id }, { okMsg: 'Đã xoá sản phẩm' }) }
+  const clearAll = async () => { if (await confirm(`Xoá TOÀN BỘ ${catalog.length} sản phẩm trong catalog? Không thể hoàn tác.`, { danger: true, confirmText: 'Xoá tất cả' })) call({ type: 'CLEAR_CATALOG' }, { okMsg: 'Đã xoá toàn bộ catalog' }) }
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -94,7 +98,7 @@ export default function Catalog() {
           <div className="space-y-4">
             <Textarea rows={6} placeholder={SAMPLE} value={csv} onChange={(e) => setCsv(e.target.value)} className="font-mono text-[11px] bg-slate-950/60" />
             <div className="flex flex-wrap gap-2.5">
-              <Btn variant="primary" icon={IconUpload} disabled={!csv.trim()} onClick={() => call({ type: 'IMPORT_CSV', csv }, { okMsg: 'Đã nhập danh sách sản phẩm (ghi đè catalog cũ)' })}>Nhập & ghi đè Catalog</Btn>
+              <Btn variant="primary" icon={IconUpload} disabled={!csv.trim()} onClick={doImport}>Nhập & ghi đè Catalog</Btn>
               <Btn variant="ghost" icon={IconFileImport} onClick={() => setCsv(SAMPLE)}>Dán dữ liệu mẫu</Btn>
             </div>
             <p className="text-[11px] text-amber-400/80">⚠️ Nhập CSV sẽ <b>ghi đè toàn bộ</b> catalog hiện tại.</p>

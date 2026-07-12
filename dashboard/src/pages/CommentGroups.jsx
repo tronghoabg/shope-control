@@ -20,7 +20,7 @@ const scoreColor = (n) => n == null ? 'gray' : n >= 70 ? 'green' : n >= 40 ? 'ye
 
 export default function CommentGroups() {
   const { s, call, setCfg, notify, account } = useShope()
-  const { posting, pstat, results, post, stop, skipWait } = usePoster()
+  const { posting, paused, pstat, results, post, stop, skipWait, pause, resume } = usePoster()
   const [cfgL, setLocal] = useState(null)
   const [sel, setSel] = useState(() => new Set())
   const [scanning, setScanning] = useState(false)
@@ -501,7 +501,7 @@ export default function CommentGroups() {
 
       {/* Logs Panel (Right Side) */}
       <div className="w-full xl:w-96 shrink-0 xl:sticky xl:top-6">
-        <ProgressPanel results={results} posting={posting} pstat={pstat} onSkipWait={skipWait}>
+        <ProgressPanel results={results} posting={posting} pstat={pstat} onSkipWait={skipWait} paused={paused} onPause={pause} onResume={resume}>
           <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
         </ProgressPanel>
       </div>

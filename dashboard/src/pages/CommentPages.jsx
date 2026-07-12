@@ -11,7 +11,7 @@ import { LogFeed } from '../LogPanel.jsx'
 
 export default function CommentPages({ goto }) {
   const { s, call, notify, account } = useShope()
-  const { posting, pstat, results, post, stop, skipWait } = usePoster()
+  const { posting, paused, pstat, results, post, stop, skipWait, pause, resume } = usePoster()
   const [pagePosts, setPagePosts] = useState([])
   const [selPP, setSelPP] = useState(() => new Set())
   const [pageContent, setPageContent] = useState('')
@@ -369,7 +369,7 @@ export default function CommentPages({ goto }) {
 
       {/* Logs Panel (Right Side) */}
       <div className="w-full xl:w-96 shrink-0 xl:sticky xl:top-6">
-        <ProgressPanel results={results} posting={posting} pstat={pstat} onSkipWait={skipWait}>
+        <ProgressPanel results={results} posting={posting} pstat={pstat} onSkipWait={skipWait} paused={paused} onPause={pause} onResume={resume}>
           <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
         </ProgressPanel>
       </div>

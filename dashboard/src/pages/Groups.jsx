@@ -12,7 +12,7 @@ const verdict = (s) => s == null ? null
 const FILTERS = [{ k: 'all', l: 'Tất cả' }, { k: 'potential', l: 'Phù hợp' }, { k: 'weak', l: 'Ít liên quan' }]
 
 export default function Groups() {
-  const { s, aiReady, call, notify, account } = useShope()
+  const { s, aiReady, call, notify, account, confirm, prompt } = useShope()
   const [loading, setLoading] = useState(false)
   const [scoring, setScoring] = useState(false)
   const [goal, setGoal] = useState('')
@@ -32,12 +32,12 @@ export default function Groups() {
   const saveTargets = (ids) => call({ type: 'SET_TARGETS', groupIds: [...new Set(ids)] })
   const toggle = (id) => saveTargets(targetSet.has(id) ? targets.filter(x => x !== id) : [...targets, id])
   const removeTarget = (id) => saveTargets(targets.filter(x => x !== id))
-  const clearTargets = () => saveTargets([])
+  const clearTargets = async () => { if (targets.length && await confirm(`Bỏ chọn toàn bộ ${targets.length} nhóm mục tiêu?`, { danger: true, confirmText: 'Bỏ chọn' })) saveTargets([]) }
   const addGood = () => saveTargets([...targets, ...groups.filter(g => (g.score ?? 0) >= 70).map(g => g.groupId)])
-  
-  const saveList = () => {
+
+  const saveList = async () => {
     if (!targets.length) return
-    const name = window.prompt('Tên danh sách Preset nhóm mục tiêu:', `Danh sách ${new Date().toLocaleDateString('vi')}`)
+    const name = await prompt('Tên danh sách Preset nhóm mục tiêu:', `Danh sách ${new Date().toLocaleDateString('vi')}`, { title: 'Lưu Preset' })
     if (name === null) return
     call({ type: 'SAVE_GROUP_LIST', name: name.trim() || 'Danh sách', groupIds: targets }, { okMsg: 'Đã lưu danh sách (Xem tại mục Đã lưu)' })
   }
