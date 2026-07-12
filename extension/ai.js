@@ -49,8 +49,9 @@ self.ShopeAI = {
   extractSearchKeyword: (cfg, text, group) => aiTask(cfg, 'searchKeyword', { text, group }),
 
   // Chấm điểm nhiều nhóm 1 lần → [{ i, niche, potential, score, reason }] (giữ nguyên thứ tự)
-  analyzeGroupsBatch: (cfg, groups, catalogContext) =>
-    aiTask(cfg, 'analyzeGroups', { groups: (groups || []).map(g => ({ name: g.name, memberCount: g.memberCount })), catalogContext }),
+  // goal (tùy chọn): lọc theo mục tiêu người dùng tự mô tả thay vì catalog.
+  analyzeGroupsBatch: (cfg, groups, catalogContext, goal) =>
+    aiTask(cfg, 'analyzeGroups', { groups: (groups || []).map(g => ({ name: g.name, memberCount: g.memberCount })), catalogContext, goal: goal || '' }),
 
   // Gợi ý từ khoá tìm nhóm theo niche
   suggestNicheKeywords: (cfg, catalog) =>

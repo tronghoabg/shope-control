@@ -1,15 +1,17 @@
 import { useState } from 'react'
-import { IconRadar2, IconExternalLink, IconStarFilled, IconUsersGroup, IconX, IconTarget, IconBookmark, IconPlayerStop } from '@tabler/icons-react'
+import { IconExternalLink, IconStarFilled, IconUsersGroup, IconX, IconTarget, IconBookmark, IconPlayerStop, IconDownload, IconSparkles, IconFilter } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
-import { Card, Btn, Badge, Empty, Hint } from '../ui.jsx'
+import { Card, Btn, Badge, Empty, Hint, Input } from '../ui.jsx'
 
 const scoreColor = (s) => s == null ? 'gray' : s >= 70 ? 'green' : s >= 40 ? 'yellow' : 'red'
 const FILTERS = [{ k: 'all', l: 'Tất cả' }, { k: 'potential', l: 'Tiềm năng (≥70đ)' }, { k: 'weak', l: 'Kém (<40đ)' }]
 
 export default function Groups() {
   const { s, aiReady, call, notify, account } = useShope()
-  const [scanning, setScanning] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [scoring, setScoring] = useState(false)
+  const [goal, setGoal] = useState('')
   const [filter, setFilter] = useState('all')
   if (!s) return <p className="text-slate-500">Đang tải danh sách nhóm…</p>
 
@@ -35,10 +37,19 @@ export default function Groups() {
     call({ type: 'SAVE_GROUP_LIST', name: name.trim() || 'Danh sách', groupIds: targets }, { okMsg: 'Đã lưu danh sách (Xem tại mục Đã lưu)' })
   }
 
-  const scan = async () => {
-    setScanning(true)
-    await call({ type: 'DISCOVER_GROUPS' }, { okMsg: 'Đã quét & đánh giá nhóm thành công', errMsg: 'Quét nhóm lỗi', timeout: 240000 })
-    setScanning(false)
+  const busy = loading || scoring
+  const load = async () => {
+    setLoading(true)
+    await call({ type: 'LOAD_JOINED_GROUPS' }, { okMsg: 'Đã tải danh sách nhóm đã tham gia', errMsg: 'Tải nhóm lỗi', timeout: 180000 })
+    setLoading(false)
+  }
+  const score = async () => {
+    if (!groups.length) return notify('red', 'Chưa có nhóm — bấm "Tải nhóm đã tham gia" trước')
+    if (!account?.loggedIn) return notify('red', 'Vui lòng đăng nhập tài khoản để dùng AI chấm điểm')
+    setScoring(true)
+    const g = goal.trim()
+    await call({ type: 'SCORE_GROUPS', goal: g }, { okMsg: g ? 'Đã lọc nhóm theo mục tiêu' : 'Đã chấm điểm theo sản phẩm shop', errMsg: 'Chấm điểm lỗi', timeout: 240000 })
+    setScoring(false)
   }
   const shown = groups.filter(g => filter === 'all' ? true : filter === 'potential' ? (g.score ?? 0) >= 70 : (g.score ?? 100) < 40)
 
@@ -47,21 +58,36 @@ export default function Groups() {
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-900/65 pb-4">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight">Danh sách nhóm của tôi</h1>
-          <p className="text-sm text-slate-400">Danh sách các hội nhóm Facebook bạn đã tham gia. AI sẽ hỗ trợ đánh giá tiềm năng bán hàng.</p>
+          <p className="text-sm text-slate-400">Tải các hội nhóm Facebook bạn đã tham gia, rồi để AI lọc theo mục tiêu và chọn nhóm để rải bài.</p>
         </div>
         <div>
-          {scanning
-            ? <Btn variant="danger" icon={IconPlayerStop} onClick={() => { ext({ type: 'CANCEL_RUN' }); notify('blue', 'Đang dừng…') }}>Dừng quét</Btn>
-            : <Btn variant="primary" icon={IconRadar2} onClick={() => {
-                if (!account?.loggedIn) return notify('red', 'Vui lòng đăng nhập tài khoản hệ thống để sử dụng AI chấm điểm')
-                scan()
-              }}>Quét &amp; Chấm Điểm AI</Btn>}
+          {busy
+            ? <Btn variant="danger" icon={IconPlayerStop} onClick={() => { ext({ type: 'CANCEL_RUN' }); notify('blue', 'Đang dừng…') }}>Dừng</Btn>
+            : <Btn variant="primary" icon={IconDownload} onClick={load}>Tải nhóm đã tham gia</Btn>}
         </div>
       </div>
 
       <Hint id="groups">
-        Nhóm bạn **đã tham gia** thành công trên tài khoản Facebook hiện tại. Nhấn **Quét & Chấm Điểm AI** để AI tự động lọc và xếp hạng chất lượng, sau đó tick chọn nhóm tiềm năng để đưa vào hàng chờ rải comment.
+        **Bước 1:** Nhấn **Tải nhóm đã tham gia** để lấy danh sách hội nhóm trên tài khoản Facebook hiện tại. **Bước 2:** Nhập **mục tiêu** (vd: *nhóm rải link affiliate, nhóm tiếng Trung, nhóm về AI*) rồi bấm **Lọc theo mục tiêu** để AI chấm điểm & xếp hạng. Cuối cùng tick chọn nhóm tiềm năng và **Lưu Preset** làm nhóm mục tiêu.
       </Hint>
+
+      {/* Bước 2: Lọc nhóm theo mục tiêu (AI) */}
+      <Card className="p-5 space-y-3">
+        <div className="flex items-center gap-2 text-sm font-bold text-slate-200">
+          <IconFilter size={18} className="text-indigo-400" />
+          <span>Lọc nhóm theo mục tiêu (AI)</span>
+        </div>
+        <p className="text-xs text-slate-500 leading-normal">Mô tả loại nhóm bạn muốn nhắm tới (cách nhau bởi dấu phẩy). AI sẽ chấm điểm ĐỘ KHỚP từng nhóm đã tải với mục tiêu này. Để trống = chấm theo sản phẩm trong Catalog.</p>
+        <div className="flex gap-2.5">
+          <Input placeholder="vd: nhóm rải link affiliate, nhóm tiếng Trung, nhóm về AI, hội mẹ bỉm…" value={goal}
+            onChange={e => setGoal(e.target.value)} onKeyDown={e => e.key === 'Enter' && !busy && score()} />
+          {scoring
+            ? <Btn variant="danger" icon={IconPlayerStop} className="shrink-0" onClick={() => { ext({ type: 'CANCEL_RUN' }); notify('blue', 'Đang dừng…') }}>Dừng</Btn>
+            : <Btn variant="primary" icon={IconSparkles} className="shrink-0" disabled={!groups.length || loading} onClick={score}>Lọc theo mục tiêu</Btn>}
+        </div>
+        {!groups.length && <p className="text-xs text-amber-400">⚠️ Hãy bấm <b>Tải nhóm đã tham gia</b> ở góc trên trước khi lọc.</p>}
+      </Card>
+
 
       {/* Target configuration deck */}
       <Card className="p-5 space-y-4">
@@ -131,7 +157,7 @@ export default function Groups() {
       <Card className="p-0 overflow-hidden">
         {groups.length === 0 ? (
           <Empty icon={IconUsersGroup}>
-            Chưa có dữ liệu nhóm đã đồng bộ. Hãy bấm nút <b>Quét & Chấm Điểm AI</b> ở góc phải phía trên để bắt đầu lấy thông tin nhóm.
+            Chưa có dữ liệu nhóm. Hãy bấm nút <b>Tải nhóm đã tham gia</b> ở góc phải phía trên để lấy danh sách hội nhóm bạn đã vào.
           </Empty>
         ) : (
           <div className="max-h-[30rem] divide-y divide-slate-850 overflow-y-auto">

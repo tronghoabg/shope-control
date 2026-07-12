@@ -1249,6 +1249,65 @@ async function discoverGroups(opts = {}) {
   } catch (e) { await endProgress('Lỗi quét nhóm: ' + (e?.message || e)); throw e; }
 }
 
+// ─── BƯỚC 1: Chỉ TẢI nhóm đã tham gia (không AI, nhanh) ───────────────────────
+// Giữ lại điểm/niche cũ nếu nhóm đã từng được chấm.
+async function loadJoinedGroups(opts = {}) {
+  await clearCancel();
+  await pushLog('info', 'Đang lấy danh sách nhóm đã tham gia…');
+  await setProgress({ phase: 'discover', current: 0, total: 0, label: 'Đang lấy danh sách nhóm đã tham gia…' });
+  try {
+    const creds = await getCreds();
+    if (!creds.dtsg || !creds.uid) throw new Error('Chưa đăng nhập Facebook — hãy đăng nhập facebook.com trong trình duyệt này rồi thử lại.');
+    const groups = await self.ShopeFbApi.fbFetchJoinedGroups(runFetchInFbTab, creds, { maxPages: opts.maxPages ?? 20 });
+    const prev = new Map((await getCfg()).discoveredGroups.map(g => [g.groupId, g]));
+    const merged = groups.map(g => {
+      const old = prev.get(g.groupId);
+      return { ...g, score: old?.score ?? null, potential: old?.potential ?? null, reason: old?.reason ?? '', niche: old?.niche ?? '' };
+    });
+    await save({ discoveredGroups: merged, groupsSyncedAt: Date.now() });
+    await pushLog('success', `Đã tải ${merged.length} nhóm đã tham gia`);
+    await endProgress(`Đã tải ${merged.length} nhóm`);
+    return merged;
+  } catch (e) { await endProgress('Lỗi tải nhóm: ' + (e?.message || e)); throw e; }
+}
+
+// ─── BƯỚC 2: AI chấm/LỌC các nhóm đã tải theo MỤC TIÊU người dùng nhập ────────
+// goal rỗng → chấm theo catalog sản phẩm (như cũ).
+async function scoreGroupsByGoal(goal) {
+  const { cfg, catalog, discoveredGroups } = await getCfg();
+  requireApiKey(cfg);
+  if (!discoveredGroups.length) throw new Error('Chưa có nhóm nào — bấm "Tải nhóm đã tham gia" trước đã.');
+  await clearCancel();
+  const goalText = String(goal || '').trim();
+  const catalogContext = buildCatalogContext(catalog);
+  const subset = discoveredGroups;
+  const scoreById = new Map();
+  let hardErr = null;
+  await pushLog('info', goalText ? `AI đang lọc ${subset.length} nhóm theo mục tiêu: ${goalText}` : `AI đang chấm ${subset.length} nhóm theo sản phẩm shop…`);
+  for (let i = 0; i < subset.length; i += 15) {
+    if (await isCancelled()) { await pushLog('info', '■ Đã dừng chấm điểm theo yêu cầu.'); break; }
+    const chunk = subset.slice(i, i + 15);
+    await setProgress({ phase: 'discover', current: i, total: subset.length, label: `Chấm điểm nhóm ${i + 1}–${Math.min(i + 15, subset.length)}/${subset.length}…` });
+    try {
+      const results = await self.ShopeAI.analyzeGroupsBatch(cfg, chunk, catalogContext, goalText);
+      for (const r of results) { const g = chunk[r.i]; if (g) scoreById.set(g.groupId, { score: r.score ?? 0, potential: !!r.potential, reason: r.reason || '', niche: r.niche || '' }); }
+    } catch (e) {
+      if (e?.code && HARD_AI_ERRORS.has(e.code)) { hardErr = e; break; }
+    }
+  }
+  if (hardErr && scoreById.size === 0) { await endProgress('Lỗi chấm điểm'); throw hardErr; }
+
+  const analyzed = discoveredGroups.map(g => {
+    const sc = scoreById.get(g.groupId);
+    return sc ? { ...g, score: sc.score, potential: sc.potential, reason: sc.reason, niche: sc.niche } : g;
+  }).sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+  await save({ discoveredGroups: analyzed, groupsSyncedAt: Date.now() });
+  const good = analyzed.filter(g => (g.score ?? 0) >= 70).length;
+  await pushLog('success', `Chấm điểm xong: ${good} nhóm khớp mục tiêu (điểm ≥70)`);
+  await endProgress(`Chấm điểm xong: ${good} nhóm tiềm năng`);
+  return analyzed;
+}
+
 // ─── Khám phá nhóm MỚI: gợi ý từ khoá → tìm → AI chấm điểm ────────────────────
 async function suggestNiches() {
   const { cfg, catalog } = await getCfg();
@@ -1484,6 +1543,8 @@ async function handle(request, sendResponse) {
         break;
       }
       case 'DISCOVER_GROUPS': { const g = await discoverGroups(request.opts || {}); sendResponse({ ok: true, count: g.length, groups: g }); break; }
+      case 'LOAD_JOINED_GROUPS': { const g = await loadJoinedGroups(request.opts || {}); sendResponse({ ok: true, count: g.length, groups: g }); break; }
+      case 'SCORE_GROUPS': { const g = await scoreGroupsByGoal(request.goal || ''); sendResponse({ ok: true, count: g.length, groups: g }); break; }
       case 'SUGGEST_NICHES': { const kw = await suggestNiches(); sendResponse({ ok: true, keywords: kw }); break; }
       case 'SEARCH_GROUPS': { const r = await searchGroupsByKeyword(request.keyword, { more: !!request.more }); sendResponse({ ok: true, count: r.length, groups: r }); break; }
       case 'SEARCH_PAGES': { const r = await searchPagesByKeyword(request.keyword, { more: !!request.more }); sendResponse({ ok: true, count: r.length, pages: r }); break; }
