@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { IconBuildingStore, IconSearch, IconExternalLink, IconTarget, IconX, IconPlayerStop, IconBookmark, IconTrash, IconListCheck, IconChevronDown } from '@tabler/icons-react'
+import { IconBuildingStore, IconSearch, IconExternalLink, IconTarget, IconX, IconPlayerStop, IconBookmark, IconTrash, IconListCheck, IconChevronDown, IconPencil } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
 import { Card, Btn, Empty, Hint, Input, Section } from '../ui.jsx'
@@ -45,6 +45,7 @@ export default function Pages({ goto }) {
   }
   const applyList = (l) => call({ type: 'SET_TARGET_PAGES', pages: l.pages }, { okMsg: `Đã chọn "${l.name}" (${l.pages.length} page)` })
   const deleteList = (l) => { if (window.confirm(`Xoá danh sách "${l.name}"?`)) call({ type: 'DELETE_PAGE_LIST', id: l.id }, { okMsg: 'Đã xoá' }) }
+  const renameList = (l) => { const n = window.prompt('Đổi tên preset page:', l.name); if (n && n.trim() && n.trim() !== l.name) call({ type: 'RENAME_PAGE_LIST', id: l.id, name: n.trim() }, { okMsg: 'Đã đổi tên' }) }
   const activeList = (l) => l.pages.length > 0 && l.pages.length === targets.length && l.pages.every(p => targetIds.has(p.pageId))
 
   return (
@@ -108,7 +109,8 @@ export default function Pages({ goto }) {
                   : 'border-slate-800 bg-slate-900/40 text-slate-350 hover:border-slate-700/60'
               }`}>
                 <button onClick={() => applyList(l)} className="hover:underline">{l.name} <span className="text-slate-500">({l.pages.length} page)</span></button>
-                <button onClick={() => deleteList(l)} className="rounded-full p-0.5 text-red-400 hover:bg-red-500/10 transition-colors"><IconTrash size={12} /></button>
+                <button onClick={() => renameList(l)} className="rounded-full p-0.5 text-slate-400 hover:bg-slate-700/40 transition-colors" title="Đổi tên"><IconPencil size={12} /></button>
+                <button onClick={() => deleteList(l)} className="rounded-full p-0.5 text-red-400 hover:bg-red-500/10 transition-colors" title="Xoá"><IconTrash size={12} /></button>
               </span>
             ))}
           </div>

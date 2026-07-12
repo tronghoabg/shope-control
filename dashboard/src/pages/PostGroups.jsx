@@ -38,6 +38,7 @@ export default function PostGroups() {
   const [images, setImages] = useState([])   // [{ name, url(dataURL) }]
   const [bg, setBg] = useState('')            // text_format_preset_id ('' = không nền)
   const [useAi, setUseAi] = useState(false)
+  const [editingId, setEditingId] = useState('')   // id bài mẫu đang mở ('' = bài mới)
   const [sel, setSel] = useState(() => new Set(s?.cfg?.groupIds || []))
   const [gFilter, setGFilter] = useState('')
   const [randomize, setRandomize] = useState(true)
@@ -84,15 +85,26 @@ export default function PostGroups() {
   const removeImg = (i) => setImages(prev => prev.filter((_, n) => n !== i))
 
   const savedPosts = s.savedPosts || []
+  const editingPost = savedPosts.find(x => x.id === editingId)
+  // Lưu: nếu đang mở 1 bài mẫu → CẬP NHẬT tại chỗ (gửi kèm id); nếu không → tạo mới.
   const savePost = async () => {
     if (!content.trim()) return notify('red', 'Chưa có nội dung để lưu')
-    await ext({ type: 'SAVE_POST', post: { content, link: link.trim(), bgPresetId: bgDisabled ? '' : bg } })
-    refresh(); notify('green', 'Đã lưu bài mẫu thành công')
+    const r = await ext({ type: 'SAVE_POST', post: { id: editingId || undefined, content, link: link.trim(), bgPresetId: bgDisabled ? '' : bg } })
+    refresh()
+    if (r?.post?.id) setEditingId(r.post.id)
+    notify('green', editingId ? 'Đã cập nhật bài mẫu' : 'Đã lưu bài mẫu mới')
   }
   const loadSaved = (id) => {
     const p = savedPosts.find(x => x.id === id); if (!p) return
-    setContent(p.content || ''); setLink(p.link || ''); setBg(p.bgPresetId || '')
-    notify('blue', `Đã tải bài viết mẫu "${p.title}"`)
+    setContent(p.content || ''); setLink(p.link || ''); setBg(p.bgPresetId || ''); setEditingId(p.id)
+    notify('blue', `Đã mở bài mẫu "${p.title}" để chỉnh sửa`)
+  }
+  const newPost = () => { setEditingId(''); setContent(''); setLink(''); setBg(''); notify('blue', 'Đã tạo bài mới') }
+  const delSaved = async () => {
+    if (!editingPost) return
+    if (!window.confirm(`Xoá bài mẫu "${editingPost.title}"?`)) return
+    await ext({ type: 'DELETE_POST', id: editingPost.id })
+    setEditingId(''); refresh(); notify('green', 'Đã xoá bài mẫu')
   }
 
   async function run() {
@@ -175,12 +187,14 @@ export default function PostGroups() {
         <div className="lg:col-span-3 space-y-6">
           <Card className="p-5 space-y-5">
             <div className="flex flex-wrap items-center gap-3 border-b border-slate-850 pb-4">
-              <select value="" onChange={e => loadSaved(e.target.value)}
+              <select value={editingId} onChange={e => e.target.value ? loadSaved(e.target.value) : newPost()}
                 className="flex-1 rounded-xl border border-slate-800 bg-slate-950/40 hover:border-slate-700/60 px-3.5 py-2.5 text-xs font-semibold text-slate-300 cursor-pointer outline-none">
-                <option value="">Tải bài viết mẫu đã lưu…{savedPosts.length ? ` (${savedPosts.length})` : ''}</option>
+                <option value="">+ Bài mới (chưa lưu)…{savedPosts.length ? ` · ${savedPosts.length} mẫu đã lưu` : ''}</option>
                 {savedPosts.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
               </select>
-              <Btn size="sm" icon={IconBookmark} onClick={savePost} disabled={!content.trim()}>Lưu bài mẫu</Btn>
+              {editingId && <Btn size="sm" variant="ghost" icon={IconX} onClick={newPost}>Bài mới</Btn>}
+              {editingId && <Btn size="sm" variant="ghost" icon={IconTrash} className="text-red-400 hover:bg-red-500/10" onClick={delSaved} />}
+              <Btn size="sm" variant={editingId ? 'primary' : 'default'} icon={IconBookmark} onClick={savePost} disabled={!content.trim()}>{editingId ? 'Cập nhật mẫu' : 'Lưu bài mẫu'}</Btn>
             </div>
 
             <Field label="Nội dung bài viết" hint={`${hasVar ? `${variants.length} biến thể · ` : ''}${hasSpin ? 'Có sử dụng Spintax' : 'Nhập spintax dạng {a|b|c}'}`}>

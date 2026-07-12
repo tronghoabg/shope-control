@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import {
   IconBuildingStore, IconDownload, IconPlayerStop, IconSend, IconTarget, IconExternalLink,
-  IconHistory, IconBookmark, IconListCheck, IconSettings, IconChevronRight
+  IconHistory, IconBookmark, IconListCheck, IconSettings, IconChevronRight, IconSearch
 } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
@@ -18,6 +18,8 @@ export default function CommentPages({ goto }) {
   const [loadingPP, setLoadingPP] = useState(false)
   const [sel, setSel] = useState(() => new Set())
   const [listName, setListName] = useState('')
+  const [poolQ, setPoolQ] = useState('')
+  const [ppQ, setPpQ] = useState('')
   const [step, setStep] = useState(2) // Default to step 3 (index 2) so they see queue immediately
 
   // Pool page chọn được
@@ -72,6 +74,9 @@ export default function CommentPages({ goto }) {
     const r = await call({ type: 'ADD_PAGE_POSTS_TO_QUEUE', posts }, { okMsg: 'Đã thêm bài viết vào hàng chờ' })
     if (r?.ok) { setPagePosts(prev => prev.filter(p => !selPP.has(p.postId))); setSelPP(new Set()) }
   }
+
+  const shownPool = poolQ.trim() ? pool.filter(p => (p.name || p.pageId || '').toLowerCase().includes(poolQ.trim().toLowerCase())) : pool
+  const shownPP = ppQ.trim() ? pagePosts.filter(p => (p.text || '').toLowerCase().includes(ppQ.trim().toLowerCase()) || (p.pageName || '').toLowerCase().includes(ppQ.trim().toLowerCase())) : pagePosts
 
   const toggleSel = (id) => setSel(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
   const allQSel = queue.length > 0 && queue.every(q => sel.has(q.postId))
@@ -168,21 +173,28 @@ export default function CommentPages({ goto }) {
           <div className="grid gap-5 md:grid-cols-3">
             <div className="md:col-span-2">
               <Card className="flex flex-col h-[32rem]">
-                <div className="flex items-center justify-between border-b border-slate-850 px-5 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-850 px-5 py-3.5">
                   <label className="flex cursor-pointer items-center gap-2.5 text-sm font-bold text-slate-200">
                     <input type="checkbox" checked={allSel} disabled={!pool.length} onChange={toggleAllPool} className="h-4.5 w-4.5 accent-indigo-500 rounded border-slate-850" />
-                    <span>Danh sách Page mục tiêu khả dụng ({pool.length})</span>
+                    <span>Page mục tiêu khả dụng ({shownPool.length}{poolQ.trim() && `/${pool.length}`})</span>
                   </label>
-                  {nPages > 0 && <span className="text-xs text-slate-400">Đã chọn {nPages} page</span>}
+                  {pool.length > 0 && (
+                    <div className="relative">
+                      <IconSearch size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                      <Input className="w-44 h-8 pl-7 text-xs rounded-lg" value={poolQ} onChange={e => setPoolQ(e.target.value)} placeholder="Tìm page…" />
+                    </div>
+                  )}
                 </div>
 
                 {pool.length === 0 ? (
                   <Empty icon={IconBuildingStore}>
                     Chưa có Page nào trong danh sách. Hãy sang tab <button onClick={() => goto?.('pages')} className="text-indigo-400 hover:underline">Tìm Page</button> để tìm kiếm &amp; lưu Page mục tiêu.
                   </Empty>
+                ) : shownPool.length === 0 ? (
+                  <Empty icon={IconSearch}>Không có page khớp "{poolQ}".</Empty>
                 ) : (
                   <div className="flex-1 divide-y divide-slate-850 overflow-y-auto">
-                    {pool.map(p => (
+                    {shownPool.map(p => (
                       <div key={p.pageId} onClick={() => toggleTarget(p)}
                         className={`flex cursor-pointer items-center gap-3.5 px-5 py-3 hover:bg-slate-900/30 transition-colors ${targetIds.has(p.pageId) ? 'bg-indigo-500/[0.03]' : ''}`}>
                         <input type="checkbox" checked={targetIds.has(p.pageId)} readOnly className="pointer-events-none h-4.5 w-4.5 accent-indigo-500 rounded border-slate-800" />
@@ -268,12 +280,18 @@ export default function CommentPages({ goto }) {
             <Card className="p-5 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-850">
                 <div>
-                  <h3 className="font-bold text-slate-200 text-sm">Bài viết cào được ({pagePosts.length} bài)</h3>
+                  <h3 className="font-bold text-slate-200 text-sm">Bài viết cào được ({shownPP.length}{ppQ.trim() && `/${pagePosts.length}`} bài)</h3>
                   <p className="text-xs text-slate-500 mt-0.5">Chọn bài cần comment và nhấn nút thêm vào hàng chờ duyệt rải link.</p>
                 </div>
-                <Btn variant="success" icon={IconSend} disabled={!selPP.size || !pageContent.trim()} onClick={addPagePosts}>
-                  Thêm vào hàng chờ ({selPP.size})
-                </Btn>
+                <div className="flex items-center gap-2.5">
+                  <div className="relative">
+                    <IconSearch size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <Input className="w-40 h-8.5 pl-7 text-xs rounded-lg" value={ppQ} onChange={e => setPpQ(e.target.value)} placeholder="Lọc bài / page…" />
+                  </div>
+                  <Btn variant="success" icon={IconSend} disabled={!selPP.size || !pageContent.trim()} onClick={addPagePosts}>
+                    Thêm vào hàng chờ ({selPP.size})
+                  </Btn>
+                </div>
               </div>
               
               {!pageContent.trim() && (
@@ -284,7 +302,7 @@ export default function CommentPages({ goto }) {
 
               <div className="overflow-hidden rounded-xl border border-slate-850/80 bg-slate-950/15">
                 <div className="max-h-80 divide-y divide-slate-850 overflow-y-auto">
-                  {pagePosts.map(p => (
+                  {shownPP.map(p => (
                     <div key={p.postId} onClick={() => toggleSelPP(p.postId)}
                       className={`flex cursor-pointer items-start gap-3 p-4 hover:bg-slate-900/30 transition-colors ${selPP.has(p.postId) ? 'bg-indigo-500/[0.02]' : ''}`}>
                       <input type="checkbox" checked={selPP.has(p.postId)} readOnly className="pointer-events-none mt-1 h-4.5 w-4.5 accent-indigo-500 rounded border-slate-800" />

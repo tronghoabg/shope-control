@@ -4,8 +4,12 @@ import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
 import { Card, Btn, Badge, Empty, Hint, Input } from '../ui.jsx'
 
-const scoreColor = (s) => s == null ? 'gray' : s >= 70 ? 'green' : s >= 40 ? 'yellow' : 'red'
-const FILTERS = [{ k: 'all', l: 'Tất cả' }, { k: 'potential', l: 'Tiềm năng (≥70đ)' }, { k: 'weak', l: 'Kém (<40đ)' }]
+// Đổi "điểm số" (khó hiểu) → nhãn chữ dễ hiểu.
+const verdict = (s) => s == null ? null
+  : s >= 70 ? { color: 'green', label: '✓ Phù hợp' }
+  : s >= 40 ? { color: 'yellow', label: 'Có thể phù hợp' }
+  : { color: 'gray', label: 'Ít liên quan' }
+const FILTERS = [{ k: 'all', l: 'Tất cả' }, { k: 'potential', l: 'Phù hợp' }, { k: 'weak', l: 'Ít liên quan' }]
 
 export default function Groups() {
   const { s, aiReady, call, notify, account } = useShope()
@@ -13,6 +17,7 @@ export default function Groups() {
   const [scoring, setScoring] = useState(false)
   const [goal, setGoal] = useState('')
   const [filter, setFilter] = useState('all')
+  const [q, setQ] = useState('')
   if (!s) return <p className="text-slate-500">Đang tải danh sách nhóm…</p>
 
   const groups = s.discoveredGroups || []
@@ -51,7 +56,10 @@ export default function Groups() {
     await call({ type: 'SCORE_GROUPS', goal: g }, { okMsg: g ? 'Đã lọc nhóm theo mục tiêu' : 'Đã chấm điểm theo sản phẩm shop', errMsg: 'Chấm điểm lỗi', timeout: 240000 })
     setScoring(false)
   }
-  const shown = groups.filter(g => filter === 'all' ? true : filter === 'potential' ? (g.score ?? 0) >= 70 : (g.score ?? 100) < 40)
+  const qq = q.trim().toLowerCase()
+  const shown = groups
+    .filter(g => filter === 'all' ? true : filter === 'potential' ? (g.score ?? 0) >= 70 : (g.score ?? 100) < 40)
+    .filter(g => !qq || (g.name || '').toLowerCase().includes(qq) || (g.niche || '').toLowerCase().includes(qq))
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -119,28 +127,29 @@ export default function Groups() {
 
       {/* Synchronized status bar */}
       <Card className="flex flex-wrap items-center justify-between gap-4 p-4">
-        <div className="text-xs text-slate-400 flex items-center gap-2">
-          <span>Thời gian đồng bộ: <span className="font-semibold text-slate-350">{syncedAt}</span></span>
+        <div className="text-xs text-slate-400 flex flex-wrap items-center gap-2">
+          <span>Đồng bộ: <span className="font-semibold text-slate-350">{syncedAt}</span></span>
           <span>·</span>
-          <Badge color="indigo">{groups.length} nhóm đã quét</Badge>
+          <Badge color="indigo">{groups.length} nhóm đã tải</Badge>
+          <Input className="w-52 h-8 text-xs rounded-lg" value={q} onChange={e => setQ(e.target.value)} placeholder="Tìm nhóm theo tên / chủ đề…" />
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex rounded-xl bg-slate-900/80 p-0.5 border border-slate-800">
             {FILTERS.map(f => (
-              <button 
-                key={f.k} 
+              <button
+                key={f.k}
                 onClick={() => setFilter(f.k)}
-                className={`rounded-lg px-3 py-1.5 text-[11px] font-bold tracking-wide uppercase transition-all ${
-                  filter === f.k 
-                    ? 'bg-indigo-650 text-white shadow-sm' 
+                className={`rounded-lg px-3 py-1.5 text-[11px] font-bold transition-all ${
+                  filter === f.k
+                    ? 'bg-indigo-650 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {f.l.split(' ')[0]}
+                {f.l}
               </button>
             ))}
           </div>
-          <Btn size="sm" icon={IconStarFilled} onClick={addGood} disabled={!groups.length} className="text-amber-400 hover:bg-amber-500/5 border border-amber-500/10">Chọn nhanh nhóm tốt</Btn>
+          <Btn size="sm" icon={IconStarFilled} onClick={addGood} disabled={!groups.length} className="text-amber-400 hover:bg-amber-500/5 border border-amber-500/10">Chọn nhanh nhóm phù hợp</Btn>
           <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-850 bg-slate-950/20 px-3 py-2 text-xs font-semibold text-slate-305">
             <input type="checkbox" disabled={!shown.length}
               checked={shown.length > 0 && shown.every(g => targetSet.has(g.groupId))}
@@ -172,7 +181,7 @@ export default function Groups() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-bold text-slate-200 text-xs truncate max-w-sm sm:max-w-md">{g.name}</span>
-                    <Badge color={scoreColor(g.score)} className="text-[10px] px-1.5">{g.score == null ? 'Chưa điểm' : `${g.score}đ`}</Badge>
+                    {verdict(g.score) && <Badge color={verdict(g.score).color} className="text-[10px] px-1.5">{verdict(g.score).label}</Badge>}
                     {g.niche && <Badge color="indigo" className="text-[10px] px-1.5">{g.niche}</Badge>}
                     {g.url && (
                       <a href={g.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-slate-500 hover:text-indigo-400 h-6 w-6 rounded-lg hover:bg-slate-800 flex items-center justify-center">
@@ -180,7 +189,10 @@ export default function Groups() {
                       </a>
                     )}
                   </div>
-                  {g.reason && <div className="mt-1 text-[11px] text-slate-500 leading-normal max-w-2xl">{g.reason}</div>}
+                  <div className="mt-1 text-[11px] text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    {g.memberCount ? <span className="flex items-center gap-1"><IconUsersGroup size={11} className="text-slate-600" /> {g.memberCount.toLocaleString('vi')} thành viên</span> : null}
+                    {g.reason && <><span>·</span><span className="text-slate-400 leading-normal max-w-2xl">{g.reason}</span></>}
+                  </div>
                 </div>
               </div>
             ))}

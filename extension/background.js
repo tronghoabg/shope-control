@@ -1535,6 +1535,30 @@ async function handle(request, sendResponse) {
         break;
       }
       case 'GET_CATALOG': { const { catalog } = await getCfg(); sendResponse({ ok: true, products: catalog }); break; }
+      case 'SAVE_CATALOG_ITEM': {
+        const { catalog } = await getCfg();
+        const it = request.item || {};
+        const id = String(it.id || '').trim();
+        if (!id) { sendResponse({ ok: false, error: 'Thiếu mã sản phẩm (ID)' }); break; }
+        if (!String(it.link || '').trim()) { sendResponse({ ok: false, error: 'Thiếu link sản phẩm' }); break; }
+        const norm = {
+          id, link: String(it.link).trim(), name: String(it.name || '').trim(), category: String(it.category || '').trim(),
+          price: Number(it.price) || 0,
+          keywords: Array.isArray(it.keywords) ? it.keywords : String(it.keywords || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+        };
+        const exists = catalog.some(p => p.id === id);
+        const next = exists ? catalog.map(p => p.id === id ? norm : p) : [norm, ...catalog];
+        await save({ catalog: next });
+        sendResponse({ ok: true, count: next.length, item: norm, updated: exists });
+        break;
+      }
+      case 'DELETE_CATALOG_ITEM': {
+        const { catalog } = await getCfg();
+        await save({ catalog: catalog.filter(p => p.id !== request.id) });
+        sendResponse({ ok: true });
+        break;
+      }
+      case 'CLEAR_CATALOG': { await save({ catalog: [] }); sendResponse({ ok: true }); break; }
       case 'TEST_AI': {
         const { cfg } = await getCfg();
         const t0 = Date.now();
@@ -1680,12 +1704,34 @@ async function handle(request, sendResponse) {
         sendResponse({ ok: true });
         break;
       }
+      case 'RENAME_GROUP_LIST': {
+        const { savedGroupLists } = await getCfg();
+        const name = String(request.name || '').slice(0, 60).trim() || 'Danh sách';
+        await save({ savedGroupLists: savedGroupLists.map(l => l.id === request.id ? { ...l, name } : l) });
+        sendResponse({ ok: true });
+        break;
+      }
+      case 'RENAME_PAGE_LIST': {
+        const { savedPageLists } = await getCfg();
+        const name = String(request.name || '').slice(0, 60).trim() || 'Danh sách';
+        await save({ savedPageLists: savedPageLists.map(l => l.id === request.id ? { ...l, name } : l) });
+        sendResponse({ ok: true });
+        break;
+      }
       case 'SAVE_POST': {
         const { savedPosts } = await getCfg();
         const p = request.post || {};
-        const post = { id: 'pp_' + Date.now().toString(36), title: String(p.title || (p.content || '').trim().split('\n')[0] || 'Bài không tên').slice(0, 80), content: p.content || '', link: p.link || '', bgPresetId: p.bgPresetId || '', createdAt: Date.now() };
-        await save({ savedPosts: [post, ...savedPosts].slice(0, 100) });
-        sendResponse({ ok: true, post });
+        const title = String(p.title || (p.content || '').trim().split('\n')[0] || 'Bài không tên').slice(0, 80);
+        // Có id + tồn tại → CẬP NHẬT tại chỗ (không tạo bản trùng). Ngược lại tạo mới.
+        if (p.id && savedPosts.some(x => x.id === p.id)) {
+          const updated = savedPosts.map(x => x.id === p.id ? { ...x, title, content: p.content || '', link: p.link || '', bgPresetId: p.bgPresetId || '' } : x);
+          await save({ savedPosts: updated });
+          sendResponse({ ok: true, post: updated.find(x => x.id === p.id), updated: true });
+        } else {
+          const post = { id: 'pp_' + Date.now().toString(36), title, content: p.content || '', link: p.link || '', bgPresetId: p.bgPresetId || '', createdAt: Date.now() };
+          await save({ savedPosts: [post, ...savedPosts].slice(0, 100) });
+          sendResponse({ ok: true, post, updated: false });
+        }
         break;
       }
       case 'DELETE_POST': {
