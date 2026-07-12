@@ -76,22 +76,26 @@ export default function Discover() {
     if (targets.length > 20 && !confirm(`Tham gia liên tục ${targets.length} nhóm dễ bị checkpoint Facebook. Bạn chắc chắn muốn tiếp tục?`)) return
     stopRef.current = false
     setBulk({ done: 0, total: targets.length, current: '' })
-    let ok = 0
+    let ok = 0, fail = 0, consec = 0, stopped = ''
     for (let i = 0; i < targets.length; i++) {
       if (stopRef.current) break
       const g = targets[i]
       setBulk({ done: i, total: targets.length, current: g.name })
       const r = await ext({ type: 'JOIN_GROUP', groupId: g.groupId }, 30000)
-      if (r?.ok) { ok++; setSelected(prev => { const n = new Set(prev); n.delete(g.groupId); return n }) }
+      if (r?.ok) { ok++; consec = 0; setSelected(prev => { const n = new Set(prev); n.delete(g.groupId); return n }) }
+      else { fail++; consec++ }
       await refresh()
       setBulk({ done: i + 1, total: targets.length, current: g.name })
+      // Nhiều nhóm join lỗi liên tiếp → nghi Facebook chặn → tự dừng bảo vệ tài khoản.
+      if (consec >= 3) { stopped = `Đã dừng: ${consec} nhóm lỗi liên tiếp — Facebook có thể đang chặn. Hãy kiểm tra tài khoản.`; notify('red', stopped); break }
       if (i < targets.length - 1 && !stopRef.current) {
-        const wait = Math.round((delay + Math.random() * delay * 0.5) * 1000)
+        const d = Math.max(20, Number(delay) || 60)   // sàn 20s chống checkpoint dù người dùng nhập sai
+        const wait = Math.round((d + Math.random() * d * 0.5) * 1000)
         for (let t = 0; t < wait && !stopRef.current; t += 500) await sleep(500)
       }
     }
     setBulk(null)
-    notify('green', `Đã gửi yêu cầu tham gia thành công ${ok}/${targets.length} nhóm`)
+    if (!stopped) notify(fail ? 'blue' : 'green', `Đã gửi yêu cầu tham gia ${ok}/${targets.length} nhóm${fail ? ` · ${fail} nhóm lỗi/cần duyệt` : ''}`)
   }
 
   const selCount = [...selected].filter(id => joinable.some(g => g.groupId === id)).length
@@ -173,7 +177,9 @@ export default function Discover() {
           
           <div className="ml-auto flex items-center gap-3">
             <span className="text-xs text-slate-400 font-semibold">Giãn cách (giây)</span>
-            <input type="number" min={20} value={delay} onChange={(e) => setDelay(+e.target.value)} disabled={!!bulk}
+            <input type="number" min={20} value={delay}
+              onChange={(e) => setDelay(e.target.value === '' ? '' : +e.target.value)}
+              onBlur={(e) => setDelay(Math.max(20, Number(e.target.value) || 60))} disabled={!!bulk}
               className="w-20 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs font-bold text-slate-100 outline-none focus:border-indigo-500" />
             {bulk
               ? <Btn size="sm" variant="danger" icon={IconPlayerStop} onClick={() => { stopRef.current = true }}>Dừng gửi</Btn>

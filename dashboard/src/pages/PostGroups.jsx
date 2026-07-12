@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, useEffect } from 'react'
 import { 
   IconSend, IconPlayerPlay, IconPlayerStop, IconTarget, IconExternalLink, IconCheck, IconX, 
   IconWand, IconRefresh, IconPhoto, IconPalette, IconSparkles, IconTrash, IconBookmark,
@@ -7,6 +7,9 @@ import {
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
 import { Card, Btn, Badge, Empty, Hint, Field, Input, Textarea, Toggle } from '../ui.jsx'
+import { MIN_DELAY } from '../commentShared.jsx'
+
+const MAX_CONSEC_FAIL = 3   // nhiều bài lỗi liên tiếp = nghi checkpoint → tự dừng
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -43,13 +46,22 @@ export default function PostGroups() {
   const [gFilter, setGFilter] = useState('')
   const [randomize, setRandomize] = useState(true)
   const [stopOnError, setStopOnError] = useState(false)
-  const [dMin, setDMin] = useState(s?.cfg?.minDelaySec ?? 45)
-  const [dMax, setDMax] = useState(s?.cfg?.maxDelaySec ?? 120)
+  const [dMin, setDMin] = useState(Math.max(MIN_DELAY, s?.cfg?.minDelaySec ?? 120))
+  const [dMax, setDMax] = useState(Math.max(MIN_DELAY, s?.cfg?.maxDelaySec ?? 240))
   const [running, setRunning] = useState(false)
   const [results, setResults] = useState([])
   const [wait, setWait] = useState(0)
   const stopRef = useRef(false)
+  const skipWaitRef = useRef(false)   // bỏ chờ delay → đăng nhóm kế tiếp ngay
   const fileRef = useRef(null)
+
+  // Cảnh báo khi rời/tải lại trang lúc đang đăng (vòng lặp chạy trong tab, đóng tab là dừng).
+  useEffect(() => {
+    if (!running) return
+    const h = (e) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', h)
+    return () => window.removeEventListener('beforeunload', h)
+  }, [running])
 
   const pool = useMemo(() => {
     const m = new Map()
@@ -111,6 +123,11 @@ export default function PostGroups() {
     const ids = [...sel]
     if (!ids.length) return notify('red', 'Chưa chọn nhóm nào')
     if (!content.trim() && !images.length) return notify('red', 'Chưa có nội dung hoặc ảnh')
+    // Xác nhận trước hành động không hoàn tác được (đăng bài thật lên nhiều nhóm) + ước tính thời gian.
+    const loS = Math.max(MIN_DELAY, Math.min(dMin, dMax)), hiS = Math.max(loS, Math.max(dMin, dMax))
+    const avg = (loS + hiS) / 2
+    const estMin = Math.round(((ids.length - 1) * avg + ids.length * 8) / 60)
+    if (!window.confirm(`Đăng bài lên ${ids.length} nhóm · giãn cách ${loS}–${hiS}s/bài · ước tính ~${estMin} phút.\n\nBài đăng là thật và không thể thu hồi tự động. Tiếp tục?`)) return
     if (randomize) shuffle(ids)
     let bag = []
     const pickVar = () => {
@@ -122,7 +139,7 @@ export default function PostGroups() {
 
     setRunning(true); stopRef.current = false
     setResults(ids.map(id => ({ id, name: nameMap[id] || id, status: 'pending' })))
-    let ok = 0, fail = 0
+    let ok = 0, fail = 0, consec = 0, stoppedMsg = ''
     for (let i = 0; i < ids.length; i++) {
       if (stopRef.current) break
       const id = ids[i]
@@ -137,20 +154,30 @@ export default function PostGroups() {
 
       if (r?.quotaBlocked) {
         setResults(rs => rs.map(x => x.id === id ? { ...x, status: 'error', error: r.error || 'Hết lượt' } : x))
-        notify('red', r.error || 'Hết lượt đăng hôm nay'); break
+        stoppedMsg = r.error || 'Hết lượt đăng hôm nay'; notify('red', stoppedMsg); break
       }
-      if (r?.ok) { ok++; setResults(rs => rs.map(x => x.id === id ? { ...x, status: 'success', url: r.postUrl } : x)) }
-      else { fail++; setResults(rs => rs.map(x => x.id === id ? { ...x, status: 'error', error: r?.error || 'Lỗi' } : x)); if (stopOnError) break }
+      if (r?.ok) { ok++; consec = 0; setResults(rs => rs.map(x => x.id === id ? { ...x, status: 'success', url: r.postUrl } : x)) }
+      else {
+        fail++; consec++
+        setResults(rs => rs.map(x => x.id === id ? { ...x, status: 'error', error: r?.error || 'Lỗi' } : x))
+        if (stopOnError) { stoppedMsg = 'Đã dừng ở bài lỗi đầu tiên (tùy chọn của bạn).'; break }
+      }
+      // Nhiều bài lỗi liên tiếp → nghi Facebook chặn → tự dừng bảo vệ tài khoản.
+      if (consec >= MAX_CONSEC_FAIL) {
+        stoppedMsg = `Đã dừng: ${consec} bài lỗi liên tiếp — có thể Facebook đang chặn. Hãy kiểm tra tài khoản trước khi chạy tiếp.`
+        notify('red', stoppedMsg); break
+      }
 
       if (i < ids.length - 1 && !stopRef.current) {
-        const lo = Math.max(5, Math.min(dMin, dMax)), hi = Math.max(lo, Math.max(dMin, dMax))
+        const lo = Math.max(MIN_DELAY, Math.min(dMin, dMax)), hi = Math.max(lo, Math.max(dMin, dMax))
         let secs = lo + Math.floor(Math.random() * (hi - lo + 1))
-        for (; secs > 0 && !stopRef.current; secs--) { setWait(secs); await sleep(1000) }
+        skipWaitRef.current = false
+        for (; secs > 0 && !stopRef.current && !skipWaitRef.current; secs--) { setWait(secs); await sleep(1000) }
         setWait(0)
       }
     }
     setRunning(false); setWait(0)
-    notify(fail ? 'blue' : 'green', `Hoàn tất: ${ok} thành công, ${fail} lỗi`)
+    if (!stoppedMsg) notify(fail ? 'blue' : 'green', `Hoàn tất: ${ok} thành công, ${fail} lỗi`)
   }
   const stop = () => { stopRef.current = true; notify('blue', 'Đang dừng chiến dịch sau bài hiện tại…') }
 
@@ -254,9 +281,14 @@ export default function PostGroups() {
             </div>
 
             <div className="grid grid-cols-2 gap-4 pt-2">
-              <Field label="Trễ tối thiểu (giây)"><Input type="number" min={5} value={dMin} onChange={e => setDMin(+e.target.value || 0)} /></Field>
-              <Field label="Trễ tối đa (giây)"><Input type="number" min={5} value={dMax} onChange={e => setDMax(+e.target.value || 0)} /></Field>
+              <Field label="Trễ tối thiểu (giây)"><Input type="number" min={MIN_DELAY} value={dMin} onChange={e => setDMin(+e.target.value || 0)} onBlur={e => setDMin(Math.max(MIN_DELAY, +e.target.value || MIN_DELAY))} /></Field>
+              <Field label="Trễ tối đa (giây)"><Input type="number" min={MIN_DELAY} value={dMax} onChange={e => setDMax(+e.target.value || 0)} onBlur={e => setDMax(Math.max(dMin, +e.target.value || dMin))} /></Field>
             </div>
+            {(dMin < MIN_DELAY || dMax < MIN_DELAY) && (
+              <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.05] px-3 py-2 text-[11px] text-amber-400">
+                ⚠️ Để an toàn chống checkpoint Facebook, hệ thống sẽ tự nâng giãn cách lên tối thiểu <b>{MIN_DELAY}s</b> khi chạy.
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-5 border-t border-slate-850 pt-4">
               <Toggle checked={randomize} onChange={setRandomize} label="Xáo trộn ngẫu nhiên thứ tự nhóm đăng" />
@@ -376,7 +408,12 @@ export default function PostGroups() {
             <Card className="p-5 space-y-4 border-indigo-500/20 bg-indigo-500/[0.02]">
               <div className="flex flex-wrap items-center justify-between text-sm gap-2">
                 <span className="font-bold text-slate-200">Tiến trình đăng bài ({done} / {results.length} nhóm)</span>
-                <span className="text-xs font-semibold text-slate-405 font-mono">{running ? (wait ? `Đang nghỉ trễ ${wait} giây…` : 'Đang xử lý đăng…') : 'Đã hoàn thành'}</span>
+                <span className="flex items-center gap-2 text-xs font-semibold text-slate-405 font-mono">
+                  {running ? (wait ? `Đang nghỉ trễ ${wait} giây…` : 'Đang xử lý đăng…') : 'Đã hoàn thành'}
+                  {running && wait > 0 && (
+                    <button onClick={() => { skipWaitRef.current = true }} className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-300 hover:bg-indigo-500/20 transition-colors">Bỏ chờ</button>
+                  )}
+                </span>
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-slate-900 border border-slate-850">
                 <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-300 animate-pulse" style={{ width: `${pct}%` }} />

@@ -121,8 +121,11 @@ function StatusChip({ ok, icon: Icon, label, title, onClick }) {
   )
 }
 
+// Trang mở tự do (không cần đăng nhập) để onboarding không bế tắc.
+const OPEN_KEYS = ['overview', 'guide', 'account', 'settings']
+
 export default function App() {
-  const { s, connected, aiReady, connectFb, account } = useShope()
+  const { s, connected, aiReady, connectFb, account, call } = useShope()
   const [page, setPage] = useState(() => {
     const hash = window.location.hash.replace('#', '')
     return NAV_BY_KEY[hash] ? hash : 'overview'
@@ -248,12 +251,13 @@ export default function App() {
                 <div className="flex flex-col gap-0.5">
                   {sec.keys.map(k => {
                     const item = NAV_BY_KEY[k]
-                    const locked = !aiReady && item.key !== 'settings'
+                    const locked = !aiReady && !OPEN_KEYS.includes(item.key)
                     const active = page === item.key
                     return (
-                      <button 
-                        key={item.key} 
-                        disabled={locked} 
+                      <button
+                        key={item.key}
+                        disabled={locked}
+                        title={locked ? 'Đăng nhập tài khoản để mở khoá tính năng này' : undefined}
                         onClick={() => setPage(item.key)}
                         className={`group relative flex items-center gap-3 rounded-xl px-4 py-3 text-xs font-bold tracking-wide transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed overflow-hidden
                           ${active 
@@ -304,7 +308,7 @@ export default function App() {
 
           {/* ── FOOTER ── */}
           <footer className="flex h-11 shrink-0 items-center justify-between border-t border-slate-900/60 bg-slate-950/40 px-6 text-xs text-slate-500 backdrop-blur-sm">
-            <span>ToolMKT AI · Phiên bản 1.0</span>
+            <span>ToolMKT AI · Phiên bản 1.2</span>
             <div className="flex items-center gap-4">
               <button onClick={() => setPage('guide')} className="hover:text-slate-300 font-medium">Tài liệu</button>
               <span className="text-slate-700">|</span>
@@ -313,6 +317,23 @@ export default function App() {
           </footer>
         </div>
       </div>
+
+      {/* Chỉ báo Auto đang chạy toàn cục + Dừng khẩn cấp (auto tương tác FB liên tục) */}
+      {s?.cfg?.autoEnabled && !s?.cfg?.killSwitch && (
+        <div className="fixed bottom-5 left-1/2 z-[90] -translate-x-1/2 flex items-center gap-3 rounded-full border border-emerald-500/30 bg-slate-900/95 py-2 pl-4 pr-2 shadow-2xl shadow-black/40 backdrop-blur">
+          <span className="flex items-center gap-2 text-xs font-bold text-emerald-300">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+            </span>
+            Auto đang chạy — tự comment lên Facebook
+          </span>
+          <button onClick={() => call({ type: 'STOP_AUTO' }, { okMsg: 'Đã dừng Auto' })}
+            className="rounded-full bg-red-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-red-500 transition-colors">
+            Dừng ngay
+          </button>
+        </div>
+      )}
     </div>
   )
 }

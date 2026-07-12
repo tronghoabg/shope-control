@@ -39,7 +39,17 @@ export function usePoster() {
   const [pstat, setPstat] = useState({ done: 0, total: 0, wait: 0 })
   const [results, setResults] = useState([])
   const stopRef = useRef(false)
+  const skipRef = useRef(false)   // bỏ chờ delay, đăng bài kế tiếp ngay
   const cfg = s?.cfg || {}
+  const MAX_CONSEC_FAIL = 3       // nhiều lỗi liên tiếp = nghi checkpoint → tự dừng
+
+  // Cảnh báo nếu người dùng đóng/tải lại tab khi đang đăng (vòng lặp chạy trong tab).
+  useEffect(() => {
+    if (!posting) return
+    const h = (e) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', h)
+    return () => window.removeEventListener('beforeunload', h)
+  }, [posting])
 
   const post = async (ids, afterEach) => {
     if (!ids.length) return notify('red', 'Chưa chọn bài nào')
@@ -52,35 +62,43 @@ export function usePoster() {
     setResults(initialResults)
     
     setPosting(true); stopRef.current = false; setPstat({ done: 0, total: ids.length, wait: 0 })
-    let ok = 0, fail = 0
+    let ok = 0, fail = 0, consec = 0, stoppedReason = ''
     for (let i = 0; i < ids.length; i++) {
       if (stopRef.current) break
-      
+
       setResults(prev => prev.map(r => r.id === ids[i] ? { ...r, status: 'posting' } : r))
-      
+
       let r
       try { r = await ext({ type: 'POST_ITEM', postId: ids[i] }, 60000) } catch (e) { r = { ok: false, error: String(e?.message || e) } }
-      
+
       setResults(prev => prev.map(res => res.id === ids[i] ? { ...res, status: r?.ok ? 'success' : 'error', error: r?.error, url: r?.result?.permalink || res.url } : res))
-      
-      if (r?.quotaBlocked) { notify('red', r.error || 'Hết hạn mức hôm nay'); break }
-      if (r?.ok) ok++; else fail++
+
+      if (r?.quotaBlocked) { stoppedReason = r.error || 'Hết hạn mức hôm nay'; notify('red', stoppedReason); break }
+      if (r?.ok) { ok++; consec = 0 } else { fail++; consec++ }
       afterEach?.(ids[i])
       setPstat(p => ({ ...p, done: i + 1 })); refresh()
+      // Nhiều lỗi liên tiếp → nghi Facebook chặn/checkpoint → tự dừng để bảo vệ tài khoản.
+      if (consec >= MAX_CONSEC_FAIL) {
+        stoppedReason = `Đã dừng: ${consec} bài lỗi liên tiếp — có thể Facebook đang chặn. Hãy kiểm tra tài khoản trước khi chạy tiếp.`
+        notify('red', stoppedReason); break
+      }
       if (i < ids.length - 1 && !stopRef.current) {
         const lo = Math.max(MIN_DELAY, Math.min(cfg.minDelaySec, cfg.maxDelaySec)), hi = Math.max(lo, Math.max(cfg.minDelaySec, cfg.maxDelaySec))
         let secs = lo + Math.floor(Math.random() * (hi - lo + 1))
-        for (; secs > 0 && !stopRef.current; secs--) { setPstat(p => ({ ...p, wait: secs })); await sleep(1000) }
+        skipRef.current = false
+        for (; secs > 0 && !stopRef.current && !skipRef.current; secs--) { setPstat(p => ({ ...p, wait: secs })); await sleep(1000) }
+        setPstat(p => ({ ...p, wait: 0 }))
       }
     }
     setPosting(false); setPstat({ done: 0, total: 0, wait: 0 })
-    notify(fail ? 'blue' : 'green', `Đã đăng ${ok}/${ids.length} bài`)
+    if (!stoppedReason) notify(fail ? 'blue' : 'green', `Đã đăng ${ok}/${ids.length} bài`)
   }
   const stop = () => { stopRef.current = true; notify('blue', 'Đang dừng…') }
-  return { posting, pstat, results, post, stop }
+  const skipWait = () => { skipRef.current = true }
+  return { posting, pstat, results, post, stop, skipWait }
 }
 
-export function ProgressPanel({ results, posting, pstat, children }) {
+export function ProgressPanel({ results, posting, pstat, children, onSkipWait }) {
   const pct = pstat.total ? Math.round((pstat.done / pstat.total) * 100) : 0
   
   // Auto-scroll to bottom of progress list when new items arrive
@@ -102,8 +120,11 @@ export function ProgressPanel({ results, posting, pstat, children }) {
           <div className="space-y-4 animate-fadeIn flex flex-col min-h-0 flex-1">
             <div className="flex flex-wrap items-center justify-between text-sm gap-2 shrink-0">
               <span className="font-bold text-slate-200">Đăng hàng loạt ({pstat.done} / {results.length})</span>
-              <span className="text-xs font-semibold text-slate-405 font-mono">
+              <span className="flex items-center gap-2 text-xs font-semibold text-slate-405 font-mono">
                 {posting ? (pstat.wait ? `Nghỉ trễ ${pstat.wait}s…` : 'Đang đăng…') : 'Hoàn thành'}
+                {posting && pstat.wait > 0 && onSkipWait && (
+                  <button onClick={onSkipWait} className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-300 hover:bg-indigo-500/20 transition-colors">Bỏ chờ</button>
+                )}
               </span>
             </div>
             <div className="h-2 w-full shrink-0 overflow-hidden rounded-full bg-slate-900 border border-slate-850">

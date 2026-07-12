@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   IconBuildingStore, IconDownload, IconPlayerStop, IconSend, IconTarget, IconExternalLink,
   IconHistory, IconBookmark, IconListCheck, IconSettings, IconChevronRight, IconSearch
@@ -11,7 +11,7 @@ import { LogFeed } from '../LogPanel.jsx'
 
 export default function CommentPages({ goto }) {
   const { s, call, notify, account } = useShope()
-  const { posting, pstat, results, post, stop } = usePoster()
+  const { posting, pstat, results, post, stop, skipWait } = usePoster()
   const [pagePosts, setPagePosts] = useState([])
   const [selPP, setSelPP] = useState(() => new Set())
   const [pageContent, setPageContent] = useState('')
@@ -41,6 +41,9 @@ export default function CommentPages({ goto }) {
   const nPages = targetPages.length
   const savedPageLists = s.savedPageLists || []
   const act = (type, postId, extra, timeout) => call({ type, postId, ...(extra || {}) }, { timeout })
+
+  // Chưa chọn Page mục tiêu mà đang ở bước "Lấy bài & rải" → đưa về bước chọn Page cho người mới.
+  useEffect(() => { if (nPages === 0 && step === 2) setStep(1) }, [nPages, step])
 
   const setTargets = (pages) => call({ type: 'SET_TARGET_PAGES', pages })
   const toggleTarget = (p) => setTargets(targetIds.has(p.pageId) ? targetPages.filter(x => x.pageId !== p.pageId) : [...targetPages, p])
@@ -77,6 +80,8 @@ export default function CommentPages({ goto }) {
 
   const shownPool = poolQ.trim() ? pool.filter(p => (p.name || p.pageId || '').toLowerCase().includes(poolQ.trim().toLowerCase())) : pool
   const shownPP = ppQ.trim() ? pagePosts.filter(p => (p.text || '').toLowerCase().includes(ppQ.trim().toLowerCase()) || (p.pageName || '').toLowerCase().includes(ppQ.trim().toLowerCase())) : pagePosts
+  const allPPSel = shownPP.length > 0 && shownPP.every(p => selPP.has(p.postId))
+  const toggleAllPP = () => setSelPP(allPPSel ? new Set() : new Set(shownPP.map(p => p.postId)))
 
   const toggleSel = (id) => setSel(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
   const allQSel = queue.length > 0 && queue.every(q => sel.has(q.postId))
@@ -280,8 +285,11 @@ export default function CommentPages({ goto }) {
             <Card className="p-5 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-850">
                 <div>
-                  <h3 className="font-bold text-slate-200 text-sm">Bài viết cào được ({shownPP.length}{ppQ.trim() && `/${pagePosts.length}`} bài)</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Chọn bài cần comment và nhấn nút thêm vào hàng chờ duyệt rải link.</p>
+                  <label className="flex cursor-pointer items-center gap-2.5">
+                    <input type="checkbox" checked={allPPSel} disabled={!shownPP.length} onChange={toggleAllPP} className="h-4.5 w-4.5 accent-indigo-500 rounded border-slate-800" />
+                    <h3 className="font-bold text-slate-200 text-sm">Bài viết cào được ({shownPP.length}{ppQ.trim() && `/${pagePosts.length}`} bài)</h3>
+                  </label>
+                  <p className="text-xs text-slate-500 mt-0.5 ml-7">Tick chọn (hoặc chọn tất cả) rồi thêm vào hàng chờ rải link.</p>
                 </div>
                 <div className="flex items-center gap-2.5">
                   <div className="relative">
@@ -361,7 +369,7 @@ export default function CommentPages({ goto }) {
 
       {/* Logs Panel (Right Side) */}
       <div className="w-full xl:w-96 shrink-0 xl:sticky xl:top-6">
-        <ProgressPanel results={results} posting={posting} pstat={pstat}>
+        <ProgressPanel results={results} posting={posting} pstat={pstat} onSkipWait={skipWait}>
           <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
         </ProgressPanel>
       </div>

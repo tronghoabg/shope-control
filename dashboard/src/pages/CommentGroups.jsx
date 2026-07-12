@@ -20,7 +20,7 @@ const scoreColor = (n) => n == null ? 'gray' : n >= 70 ? 'green' : n >= 40 ? 'ye
 
 export default function CommentGroups() {
   const { s, call, setCfg, notify, account } = useShope()
-  const { posting, pstat, results, post, stop } = usePoster()
+  const { posting, pstat, results, post, stop, skipWait } = usePoster()
   const [cfgL, setLocal] = useState(null)
   const [sel, setSel] = useState(() => new Set())
   const [scanning, setScanning] = useState(false)
@@ -73,11 +73,12 @@ export default function CommentGroups() {
   const setNum = (k) => (e) => setLocal({ ...cfgL, [k]: +e.target.value })
   
   const saveAdv = () => {
+    const raised = (cfgL.minDelaySec && cfgL.minDelaySec < MIN_DELAY) || (cfgL.maxDelaySec && cfgL.maxDelaySec < MIN_DELAY)
     const minD = Math.max(MIN_DELAY, cfgL.minDelaySec || MIN_DELAY)
     const maxD = Math.max(minD, cfgL.maxDelaySec || minD)
     setLocal({ ...cfgL, minDelaySec: minD, maxDelaySec: maxD })
     setCfg({ dailyCap: cfgL.dailyCap, minDelaySec: minD, maxDelaySec: maxD, minScore: cfgL.minScore, postsPerScan: cfgL.postsPerScan, requireApproval: cfgL.requireApproval, subId: cfgL.subId, requiredKeywords: cfgL.requiredKeywords, bannedKeywords: cfgL.bannedKeywords })
-    notify('green', 'Đã lưu cấu hình thành công')
+    notify(raised ? 'blue' : 'green', raised ? `Đã lưu — giãn cách được tự nâng lên tối thiểu ${MIN_DELAY}s để an toàn chống checkpoint.` : 'Đã lưu cấu hình thành công')
   }
   
   const act = (type, postId, extra, timeout) => call({ type, postId, ...(extra || {}) }, { timeout })
@@ -500,7 +501,7 @@ export default function CommentGroups() {
 
       {/* Logs Panel (Right Side) */}
       <div className="w-full xl:w-96 shrink-0 xl:sticky xl:top-6">
-        <ProgressPanel results={results} posting={posting} pstat={pstat}>
+        <ProgressPanel results={results} posting={posting} pstat={pstat} onSkipWait={skipWait}>
           <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
         </ProgressPanel>
       </div>
