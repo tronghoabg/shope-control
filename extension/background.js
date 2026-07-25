@@ -36,9 +36,10 @@ const DEFAULTS = {
 const HARD_AI_ERRORS = new Set(['AI_CAP', 'NO_SYSTEM_KEY', 'BANNED', 'RATE_LIMIT', 'TOO_LARGE', 'UNAUTHORIZED']);
 
 async function getCfg() {
-  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license', 'savedGroupLists', 'savedPosts', 'targetPages', 'savedPageLists', 'pageSearchResults', 'searchCursors', 'searchKeywords', 'searchHasMore', 'pageSearchCursors', 'pageSearchKeywords', 'pageHasMore', 'job']);
+  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license', 'savedGroupLists', 'savedPosts', 'targetPages', 'savedPageLists', 'pageSearchResults', 'searchCursors', 'searchKeywords', 'searchHasMore', 'pageSearchCursors', 'pageSearchKeywords', 'pageHasMore', 'job', 'pendingPosts']);
   return {
     job: s.job || null,   // chiến dịch đăng hàng loạt đang chạy nền (SW)
+    pendingPosts: s.pendingPosts || [],   // [{ postId, groupId, groupName, snippet, postUrl, postedAt, status }] — bài chờ duyệt
     savedGroupLists: s.savedGroupLists || [],   // [{ id, name, groupIds:[], createdAt }]
     savedPosts: s.savedPosts || [],             // [{ id, title, content, link, bgPresetId, createdAt }]
     targetPages: s.targetPages || [],           // [{ pageId, name, url, icon }] — page mục tiêu comment dạo
@@ -893,6 +894,18 @@ async function refillQueue(opts = {}) {
   return newQueue.length;
 }
 
+// Cache ảnh đính kèm comment: upload 1 lần rồi tái dùng photoId (đỡ upload lại mỗi comment). TTL 20'.
+let _cmtPhoto = { key: '', id: '', at: 0 };
+function invalidateCmtPhoto() { _cmtPhoto = { key: '', id: '', at: 0 }; }
+async function getCommentPhotoId(creds, base64) {
+  const key = base64.length + ':' + base64.slice(-48);
+  if (_cmtPhoto.id && _cmtPhoto.key === key && Date.now() - _cmtPhoto.at < 20 * 60 * 1000) return _cmtPhoto.id;
+  await pushLog('info', 'Đang tải ảnh đính kèm lên Facebook…');
+  const id = await self.ShopeFbApi.fbUploadPhoto(runUploadInFbTab, creds, base64);
+  _cmtPhoto = { key, id, at: Date.now() };
+  return id;
+}
+
 // ─── Đăng 1 comment (đã chọn) + ghi sổ. Không đụng tới hàng đợi. ──────────────
 async function commitComment(item) {
   let { cfg, state, stats, commentedPosts } = await getCfg();
@@ -910,11 +923,11 @@ async function commitComment(item) {
   const creds = await getCreds();
   let ok = false, error = '';
   try {
-    if (cfg.commentImageBase64) {
+    // Ảnh đính kèm CHỈ cho comment dạo (mode 'social') — KHÔNG đính vào comment rải link (Shopee/Catalog).
+    // Tối ưu: upload 1 lần rồi tái dùng photoId (cache theo ảnh) → không upload lại mỗi comment.
+    if (item.mode === 'social' && cfg.commentImageBase64) {
       try {
-        await pushLog('info', `Đang tải ảnh đính kèm lên Facebook...`);
-        const photoId = await self.ShopeFbApi.fbUploadPhoto(runUploadInFbTab, creds, cfg.commentImageBase64);
-        item.attachmentId = photoId;
+        item.attachmentId = await getCommentPhotoId(creds, cfg.commentImageBase64);
       } catch (err) {
         await pushLog('error', `Tải ảnh đính kèm thất bại, sẽ bỏ qua ảnh: ${err.message}`);
       }
@@ -960,6 +973,8 @@ async function commitComment(item) {
     stats = { ...stats, lastError: error, lastRunAt: Date.now() };
     await pushLog('error', `✗ Đăng comment lỗi: ${error}`);
   }
+  // Đăng lỗi mà có đính ảnh → huỷ cache photoId (phòng ảnh đã bị FB "dùng 1 lần") để lần sau upload lại.
+  if (!ok && item.attachmentId) invalidateCmtPhoto();
   const delay = rndDelaySec(cfg);
   await save({ commentedPosts, state: { ...state, nextActionAt: Date.now() + delay * 1000 }, stats });
   return { ok, error, doneToday: state.doneToday, nextInSec: delay };
@@ -999,9 +1014,18 @@ async function aiRewrite(text) {
 // ─── Đăng 1 bài vào 1 nhóm (ComposerStoryCreate) ─────────────────────────────
 // opts: { link, bgPresetId, images:[dataURL] }
 async function postToGroup(groupId, message, link, opts = {}) {
-  const { cfg, discoveredGroups, searchResults } = await getCfg();
+  const { cfg, state, discoveredGroups, searchResults } = await getCfg();
   const gName = (discoveredGroups.find(g => g.groupId === groupId)?.name)
     || (searchResults.find(g => g.groupId === groupId)?.name) || `Nhóm ${groupId}`;
+
+  // C) Chống đăng TRÙNG nhóm trong NGÀY (an toàn checkpoint) — trừ khi ép đăng lại (opts.allowRepost).
+  const tk = todayKey();
+  const pgt = (state.postedGroupsToday && state.postedGroupsToday.dateKey === tk) ? state.postedGroupsToday : { dateKey: tk, ids: [] };
+  if (!opts.allowRepost && pgt.ids.includes(String(groupId))) {
+    await pushLog('info', `⏭ Bỏ qua "${gName}": đã đăng hôm nay rồi (chống trùng/spam).`);
+    return { ok: false, skipped: true, alreadyPosted: true };
+  }
+
   const qc = await checkQuota(cfg);
   if (!qc.ok) { await pushLog('error', `⛔ ${qc.msg}`); return { ok: false, error: qc.msg, quotaBlocked: true }; }
   const creds = await getCreds();
@@ -1026,7 +1050,26 @@ async function postToGroup(groupId, message, link, opts = {}) {
   catch (e) { await pushLog('error', `✗ Đăng bài "${gName}" lỗi: ${e?.message || e}`); return { ok: false, error: String(e?.message || e) }; }
 
   if (res.ok) {
+    // Ghi nhận đã đăng nhóm này hôm nay (chống trùng ở lần sau)
+    try {
+      const { state: st2 } = await getCfg();
+      const pgt2 = (st2.postedGroupsToday && st2.postedGroupsToday.dateKey === tk) ? st2.postedGroupsToday : { dateKey: tk, ids: [] };
+      if (!pgt2.ids.includes(String(groupId))) pgt2.ids.push(String(groupId));
+      await save({ state: { ...st2, postedGroupsToday: pgt2 } });
+    } catch {}
     await pushLog('success', `✓ Đã đăng bài vào ${gName}${photoIds.length ? ` (${photoIds.length} ảnh)` : ''}`);
+    // B) Ghi phiếu theo dõi bài chờ duyệt (verify sau bằng VERIFY_PENDING)
+    try {
+      const postId = (String(res.postUrl || '').match(/\/(?:permalink|posts)\/(\d{5,})/) || [])[1] || '';
+      if (postId) {
+        const { pendingPosts = [] } = await chrome.storage.local.get('pendingPosts');
+        if (!pendingPosts.some(p => p.postId === postId)) {
+          pendingPosts.unshift({ postId, groupId: String(groupId), groupName: gName, snippet: String(message || '').replace(/\s+/g, ' ').slice(0, 60), postUrl: res.postUrl || '', postedAt: Date.now(), status: 'pending' });
+          while (pendingPosts.length > 300) pendingPosts.pop();
+          await chrome.storage.local.set({ pendingPosts });
+        }
+      }
+    } catch {}
     await reportComment(cfg, { mode: 'post', groupId, groupName: gName, content: message || '', link: link || '', permalink: res.postUrl || '' });
     await refreshLicense(cfg);
     try {
@@ -1039,6 +1082,48 @@ async function postToGroup(groupId, message, link, opts = {}) {
     await pushLog('error', `✗ Đăng bài "${gName}" thất bại: ${JSON.stringify(res.errors || '')}`);
   }
   return res;
+}
+
+// ─── B) Xác minh bài chờ duyệt: bài đã LÊN chưa? (port từ adsmeta verifyPendingApprovals) ──
+// Cách kiểm: (1) Graph node {groupId}_{postId} có permalink_url = đã lên; (2) fallback đọc feed nhóm trong tab
+// xem có postId/đoạn đầu nội dung. >5 ngày chưa lên → coi rớt (thôi theo dõi). Giãn cách 2.5–5s như người thật.
+async function verifyPendingPosts(max = 15) {
+  const store = await chrome.storage.local.get('pendingPosts');
+  const pendingPosts = store.pendingPosts || [];
+  const creds = await getCreds();
+  const now = Date.now(), GIVEUP = 5 * 86400000, MAX_AGE = 7 * 86400000;
+  const tickets = pendingPosts
+    .filter(t => t.status === 'pending' && now - t.postedAt < MAX_AGE)
+    .sort((a, b) => a.postedAt - b.postedAt)
+    .slice(0, Math.max(1, max));
+  let live = 0, still = 0, rejected = 0;
+  for (let i = 0; i < tickets.length; i++) {
+    const t = tickets[i];
+    if (i > 0) await new Promise(r => setTimeout(r, 2500 + Math.random() * 2500));
+    let isLive = false;
+    // 1) Graph node (chắc chắn nếu token đọc được)
+    try {
+      const nid = `${t.groupId}_${t.postId}`;
+      const url = `https://graph.facebook.com/${encodeURIComponent(nid)}?fields=id,permalink_url${creds.token ? `&access_token=${encodeURIComponent(creds.token)}` : ''}`;
+      const r = await fetch(url);
+      const j = await r.json().catch(() => null);
+      if (j && !j.error && j.permalink_url) isLive = true;
+    } catch { /* thử fallback */ }
+    // 2) Fallback: đọc feed nhóm TRONG TAB, tìm postId hoặc đoạn đầu nội dung
+    if (!isLive && t.snippet && t.snippet.length >= 12) {
+      try {
+        const html = await runFetchInFbTab(`https://www.facebook.com/groups/${t.groupId}`, 'GET');
+        if (html && (html.includes(t.postId) || html.includes(t.snippet.slice(0, 40)))) isLive = true;
+      } catch { /* coi như chưa xác nhận */ }
+    }
+    const idx = pendingPosts.findIndex(p => p.postId === t.postId && p.groupId === t.groupId);
+    if (isLive) { live++; if (idx >= 0) pendingPosts[idx].status = 'approved'; }
+    else if (now - t.postedAt > GIVEUP) { rejected++; if (idx >= 0) pendingPosts[idx].status = 'rejected'; }
+    else { still++; }
+  }
+  await chrome.storage.local.set({ pendingPosts });
+  await pushLog('info', `Kiểm tra bài chờ duyệt: ${live} đã lên · ${still} còn chờ · ${rejected} không lên`);
+  return { checked: tickets.length, live, pending: still, rejected };
 }
 
 // ─── Một bước scheduler: chọn 1 item phù hợp rồi đăng ─────────────────────────
@@ -1092,8 +1177,8 @@ async function runJobItem(job, id, cfg) {
   if (p.useAi && message.trim()) {
     try { const t = await aiRewrite(message); if (t) message = t; } catch {}
   }
-  const r = await postToGroup(id, message, p.link || '', { bgPresetId: p.bgPresetId || '', images: p.images || [] });
-  return { ok: r.ok, error: r.ok ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), quotaBlocked: !!r.quotaBlocked, url: r.postUrl || '' };
+  const r = await postToGroup(id, message, p.link || '', { bgPresetId: p.bgPresetId || '', images: p.images || [], allowRepost: !!p.allowRepost });
+  return { ok: r.ok, skipped: !!r.skipped, error: r.ok || r.skipped ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), quotaBlocked: !!r.quotaBlocked, url: r.postUrl || '' };
 }
 
 async function startJob(kind, items, params = {}) {
@@ -1140,15 +1225,16 @@ async function jobStep() {
 
     let cur = (await getCfg()).job;
     if (!cur || !cur.running) return;   // đã dừng trong lúc đăng
-    cur.results = cur.results.map((r, i) => i === curIdx ? { ...r, status: res.ok ? 'success' : 'error', error: res.error || '', url: res.url || r.url } : r);
+    cur.results = cur.results.map((r, i) => i === curIdx ? { ...r, status: res.skipped ? 'skipped' : (res.ok ? 'success' : 'error'), error: res.error || '', url: res.url || r.url } : r);
     if (res.quotaBlocked) { cur.running = false; cur.stoppedMsg = res.error || 'Hết hạn mức'; await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); await pushLog('error', `⛔ ${cur.stoppedMsg}`); return; }
-    cur.consec = res.ok ? 0 : (cur.consec || 0) + 1;
+    cur.consec = (res.ok || res.skipped) ? 0 : (cur.consec || 0) + 1;   // bỏ qua (đã đăng hôm nay) KHÔNG tính lỗi
     cur.idx = curIdx + 1;
     // Tùy chọn "dừng ngay ở bài lỗi đầu tiên" (chỉ postgroup).
-    if (!res.ok && cur.params && cur.params.stopOnError) { cur.running = false; cur.stoppedMsg = 'Đã dừng ở mục lỗi đầu tiên (tùy chọn của bạn).'; await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); return; }
+    if (!res.ok && !res.skipped && cur.params && cur.params.stopOnError) { cur.running = false; cur.stoppedMsg = 'Đã dừng ở mục lỗi đầu tiên (tùy chọn của bạn).'; await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); return; }
     if (cur.consec >= 3) { cur.running = false; cur.stoppedMsg = 'Đã dừng: 3 mục lỗi liên tiếp — có thể Facebook đang chặn. Kiểm tra tài khoản trước khi chạy tiếp.'; await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); await pushLog('error', `⛔ ${cur.stoppedMsg}`); return; }
     if (cur.idx >= cur.total) { cur.running = false; cur.finishedAt = Date.now(); await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); await pushLog('success', `✓ Xong chiến dịch nền: ${cur.results.filter(r => r.status === 'success').length}/${cur.total}`); return; }
-    cur.nextAt = Date.now() + jobDelaySec(cur) * 1000;
+    // Bỏ qua (không gửi request tới FB) → chuyển bài kế NGAY, khỏi chờ giãn cách.
+    cur.nextAt = res.skipped ? Date.now() : Date.now() + jobDelaySec(cur) * 1000;
     await save({ job: cur });
   } catch (e) { console.warn('jobStep', e); }
   finally { _jobBusy = false; }
@@ -1165,10 +1251,18 @@ async function _processOneStep(opts = {}) {
   const tk = todayKey();
   if (state.dateKey !== tk) state = { ...state, dateKey: tk, doneToday: 0 };
 
+  // Ghi 1 dòng trạng thái Auto khi LÝ DO CHỜ thay đổi (tránh im lặng khó hiểu, không spam log).
+  const note = async (key, msg) => {
+    if (manual || stats.autoNote === key) return;
+    stats = { ...stats, autoNote: key };
+    await save({ stats });
+    if (msg) await pushLog('info', msg);
+  };
+
   if (cfg.killSwitch) return { skipped: 'kill-switch' };
   if (!manual && !cfg.autoEnabled) return { skipped: 'tắt' };
-  if (state.doneToday >= cfg.dailyCap) return { skipped: 'đạt cap/ngày' };
-  if (!manual && Date.now() < state.nextActionAt) return { skipped: 'đang chờ delay' };
+  if (state.doneToday >= cfg.dailyCap) { await note('cap', `⏸ Auto tạm nghỉ: đã đủ ${cfg.dailyCap} bài hôm nay. Sang ngày mai tự chạy tiếp.`); return { skipped: 'đạt cap/ngày' }; }
+  if (!manual && Date.now() < state.nextActionAt) return { skipped: 'đang chờ delay' };   // chờ giãn cách bình thường → không log
 
   // Hết hàng đợi → nạp thêm
   if (!queue.length) {
@@ -1176,11 +1270,13 @@ async function _processOneStep(opts = {}) {
       const n = await refillQueue();
       ({ queue } = await getCfg());
       if (!n) {
+        await note('nopost', `🔎 Auto: chưa tìm thấy bài tiềm năng mới trong ${cfg.groupIds?.length || 0} nhóm mục tiêu — sẽ thử lại sau. (Kiểm tra đã chọn nhóm mục tiêu chưa?)`);
         await save({ state: { ...state, nextActionAt: Date.now() + rndDelaySec(cfg) * 1000 } });
         return { skipped: 'không có bài tiềm năng mới' };
       }
     } catch (e) {
       await save({ stats: { ...stats, lastError: String(e?.message || e), lastRunAt: Date.now() } });
+      await note('err', `⚠ Auto lỗi khi quét: ${String(e?.message || e)}`);
       return { error: String(e?.message || e) };
     }
   }
@@ -1188,9 +1284,11 @@ async function _processOneStep(opts = {}) {
   // Chọn item: nếu cần duyệt (và auto) → chỉ lấy item đã approved; còn lại lấy đầu hàng.
   const idx = (cfg.requireApproval && !manual) ? queue.findIndex(it => it.approved) : 0;
   if (idx < 0) {
+    await note('approve', `⏳ Auto đang CHỜ DUYỆT: ${queue.length} comment trong hàng chờ chưa được duyệt (Duyệt tay = Có). Vào "Comment Nhóm" bấm Duyệt, hoặc TẮT "Duyệt tay" để Auto tự đăng.`);
     await save({ state: { ...state, nextActionAt: Date.now() + rndDelaySec(cfg) * 1000 } });
     return { skipped: 'chờ duyệt comment trong web app' };
   }
+  await note('active', '');   // reset trạng thái → lần chờ sau lại ghi log
   const [item] = queue.splice(idx, 1);
   await save({ queue });
   const r = await commitComment(item);
@@ -1783,7 +1881,59 @@ async function handle(request, sendResponse) {
         break;
       }
       case 'JOIN_GROUP': { const res = await joinGroupById(request.groupId); sendResponse({ ok: res.ok, skipped: !!res.skipped, needQuestions: !!res.needQuestions, error: res.ok || res.skipped ? '' : (res.error || JSON.stringify(res.errors || 'join_failed')) }); break; }
-      case 'POST_GROUP': { const r = await postToGroup(request.groupId, request.message || '', request.link || '', { bgPresetId: request.bgPresetId || '', images: request.images || [] }); sendResponse({ ok: r.ok, error: r.ok ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), postUrl: r.postUrl || '', quotaBlocked: !!r.quotaBlocked }); break; }
+      case 'POST_GROUP': { const r = await postToGroup(request.groupId, request.message || '', request.link || '', { bgPresetId: request.bgPresetId || '', images: request.images || [], allowRepost: !!request.allowRepost }); sendResponse({ ok: r.ok, skipped: !!r.skipped, alreadyPosted: !!r.alreadyPosted, error: r.ok || r.skipped ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), postUrl: r.postUrl || '', quotaBlocked: !!r.quotaBlocked }); break; }
+      // A) Đọc comment của 1 bài đã đăng → tìm khách (người comment = lead)
+      case 'LIST_POST_COMMENTS': {
+        try {
+          const creds = await getCreds();
+          if (!creds.dtsg || !creds.uid) { sendResponse({ ok: false, error: 'Chưa kết nối Facebook' }); break; }
+          const r = await self.ShopeFbApi.fbListPostComments(runFetchInFbTab, creds, request.postId, request.cursor || null);
+          sendResponse({ ok: true, comments: r.comments, nextCursor: r.nextCursor });
+        } catch (e) { sendResponse({ ok: false, error: String(e?.message || e) }); }
+        break;
+      }
+      // D) Ẩn 1 comment (spam/đối thủ) trên bài mình
+      case 'HIDE_COMMENT': {
+        try {
+          const creds = await getCreds();
+          const r = await self.ShopeFbApi.fbHideComment(runFetchInFbTab, creds, request.commentId);
+          if (r.ok) await pushLog('success', 'Đã ẩn 1 comment');
+          sendResponse({ ok: r.ok, error: r.ok ? '' : JSON.stringify(r.errors || 'hide_failed') });
+        } catch (e) { sendResponse({ ok: false, error: String(e?.message || e) }); }
+        break;
+      }
+      // B) Xác minh bài chờ duyệt đã lên chưa
+      case 'VERIFY_PENDING': {
+        try { const r = await verifyPendingPosts(request.max || 15); sendResponse({ ok: true, ...r }); }
+        catch (e) { sendResponse({ ok: false, error: String(e?.message || e) }); }
+        break;
+      }
+      case 'CLEAR_PENDING': {
+        const { pendingPosts = [] } = await chrome.storage.local.get('pendingPosts');
+        // Xoá phiếu đã xong (approved/rejected); giữ phiếu còn chờ.
+        await chrome.storage.local.set({ pendingPosts: pendingPosts.filter(p => p.status === 'pending') });
+        sendResponse({ ok: true });
+        break;
+      }
+      // E) Rời 1 nhóm
+      case 'LEAVE_GROUP': {
+        try {
+          const gid = String(request.groupId);
+          const creds = await getCreds();
+          const r = await self.ShopeFbApi.fbLeaveGroup(runFetchInFbTab, creds, { groupId: gid });
+          if (r.ok) {
+            await pushLog('info', `➖ Đã rời nhóm ${gid}`);
+            const { cfg, searchResults, discoveredGroups } = await getCfg();
+            await save({
+              searchResults: (searchResults || []).map(x => x.groupId === gid ? { ...x, joined: false } : x),
+              discoveredGroups: (discoveredGroups || []).filter(x => x.groupId !== gid),   // gỡ khỏi "Nhóm của tôi"
+              cfg: { ...cfg, groupIds: (cfg.groupIds || []).filter(id => id !== gid) },     // gỡ khỏi mục tiêu
+            });
+          }
+          sendResponse({ ok: r.ok, error: r.ok ? '' : JSON.stringify(r.errors || 'leave_failed') });
+        } catch (e) { sendResponse({ ok: false, error: String(e?.message || e) }); }
+        break;
+      }
       case 'AI_REWRITE': { try { const t = await aiRewrite(request.text || ''); sendResponse({ ok: !!t, text: t, error: t ? '' : 'AI không trả về nội dung' }); } catch (e) { sendResponse({ ok: false, error: String(e?.message || e) }); } break; }
       case 'GET_GROUPS': { const { discoveredGroups, groupsSyncedAt } = await getCfg(); sendResponse({ ok: true, groups: discoveredGroups, syncedAt: groupsSyncedAt }); break; }
       // Khôi phục dữ liệu nhóm từ bản sao trên localStorage của web (vd sau khi cài lại extension).
@@ -1873,7 +2023,8 @@ async function handle(request, sendResponse) {
           for (let i = 0; i < nGroups; i++) {
             if (await isCancelled()) { stopped = true; await pushLog('info', '■ Đã dừng quét theo yêu cầu.'); break; }
             await setProgress({ phase: 'scan', current: i, total: nGroups, label: `Quét nhóm ${i + 1}/${nGroups}…` });
-            try { total += await refillQueue({ fresh: true }); }
+            // Chạy qua KHOÁ TUẦN TỰ như lúc đăng → merge hàng chờ không đè lên item vừa được auto đăng/xoá (chống race).
+            try { total += await serializeCommit(() => refillQueue({ fresh: true })); }
             catch (e) {
               if (e?.code && HARD_AI_ERRORS.has(e.code)) { hardErr = e; break; }   // hết trần AI / chưa cấu hình / bị chặn → dừng, khỏi lặp lỗi
               await pushLog('error', `Quét nhóm lỗi: ${e?.message || e}`);

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { IconExternalLink, IconStarFilled, IconUsersGroup, IconX, IconTarget, IconBookmark, IconPlayerStop, IconDownload, IconSparkles, IconFilter } from '@tabler/icons-react'
+import { IconExternalLink, IconStarFilled, IconUsersGroup, IconX, IconTarget, IconBookmark, IconPlayerStop, IconDownload, IconSparkles, IconFilter, IconDoorExit } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
 import { Card, Btn, Badge, Empty, Hint, Input } from '../ui.jsx'
@@ -34,6 +34,12 @@ export default function Groups() {
   const removeTarget = (id) => saveTargets(targets.filter(x => x !== id))
   const clearTargets = async () => { if (targets.length && await confirm(`Bỏ chọn toàn bộ ${targets.length} nhóm mục tiêu?`, { danger: true, confirmText: 'Bỏ chọn' })) saveTargets([]) }
   const addGood = () => saveTargets([...targets, ...groups.filter(g => (g.score ?? 0) >= 70).map(g => g.groupId)])
+  const leaveGroup = async (g) => {
+    if (!(await confirm(`Rời khỏi nhóm "${g.name}"? Bạn sẽ không còn là thành viên (gỡ khỏi danh sách).`, { danger: true, confirmText: 'Rời nhóm' }))) return
+    const r = await ext({ type: 'LEAVE_GROUP', groupId: g.groupId }, 30000)
+    if (r?.ok) notify('green', `Đã rời nhóm "${g.name}"`)
+    else notify('red', `Rời nhóm lỗi: ${r?.error || ''}`)
+  }
 
   const saveList = async () => {
     if (!targets.length) return
@@ -194,6 +200,11 @@ export default function Groups() {
                     {g.reason && <><span>·</span><span className="text-slate-400 leading-normal max-w-2xl">{g.reason}</span></>}
                   </div>
                 </div>
+
+                <button onClick={(e) => { e.stopPropagation(); leaveGroup(g) }} title="Rời nhóm này"
+                  className="shrink-0 mt-0.5 inline-flex items-center gap-1 rounded-lg border border-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-500 hover:border-red-900/40 hover:bg-red-950/20 hover:text-red-400 transition-colors">
+                  <IconDoorExit size={13} /> Rời
+                </button>
               </div>
             ))}
           </div>

@@ -324,8 +324,8 @@ export default function App() {
         const jobOn = s?.job?.running
         if (!autoOn && !jobOn) return null
         const label = jobOn
-          ? (s.job.kind === 'postgroup' ? 'Đang đăng bài nền lên Facebook' : 'Đang rải comment nền lên Facebook') + ` (${s.job.idx || 0}/${s.job.total || 0})`
-          : 'Auto đang chạy — tự comment lên Facebook'
+          ? (s.job.kind === 'postgroup' ? 'Đang đăng bài nền' : 'Đang rải comment nền') + ` — ${s.job.idx || 0}/${s.job.total || 0} bài`
+          : `Auto đang chạy — đã đăng ${s.state?.doneToday || 0}/${s.cfg?.dailyCap || 0} hôm nay`
         const onStop = () => jobOn ? call({ type: 'JOB_STOP' }, { okMsg: 'Đã dừng chiến dịch' }) : call({ type: 'STOP_AUTO' }, { okMsg: 'Đã dừng Auto' })
         return (
           <div className="fixed bottom-5 left-1/2 z-[90] -translate-x-1/2 flex items-center gap-3 rounded-full border border-emerald-500/30 bg-slate-900/95 py-2 pl-4 pr-2 shadow-2xl shadow-black/40 backdrop-blur">
