@@ -308,7 +308,7 @@ export default function App() {
 
           {/* ── FOOTER ── */}
           <footer className="flex h-11 shrink-0 items-center justify-between border-t border-slate-900/60 bg-slate-950/40 px-6 text-xs text-slate-500 backdrop-blur-sm">
-            <span>ToolMKT AI · Phiên bản 1.2</span>
+            <span>ToolMKT AI · Phiên bản 1.3</span>
             <div className="flex items-center gap-4">
               <button onClick={() => setPage('guide')} className="hover:text-slate-300 font-medium">Tài liệu</button>
               <span className="text-slate-700">|</span>
@@ -318,22 +318,30 @@ export default function App() {
         </div>
       </div>
 
-      {/* Chỉ báo Auto đang chạy toàn cục + Dừng khẩn cấp (auto tương tác FB liên tục) */}
-      {s?.cfg?.autoEnabled && !s?.cfg?.killSwitch && (
-        <div className="fixed bottom-5 left-1/2 z-[90] -translate-x-1/2 flex items-center gap-3 rounded-full border border-emerald-500/30 bg-slate-900/95 py-2 pl-4 pr-2 shadow-2xl shadow-black/40 backdrop-blur">
-          <span className="flex items-center gap-2 text-xs font-bold text-emerald-300">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+      {/* Chỉ báo Auto / chiến dịch nền đang chạy toàn cục + Dừng khẩn cấp */}
+      {(() => {
+        const autoOn = s?.cfg?.autoEnabled && !s?.cfg?.killSwitch
+        const jobOn = s?.job?.running
+        if (!autoOn && !jobOn) return null
+        const label = jobOn
+          ? (s.job.kind === 'postgroup' ? 'Đang đăng bài nền lên Facebook' : 'Đang rải comment nền lên Facebook') + ` (${s.job.idx || 0}/${s.job.total || 0})`
+          : 'Auto đang chạy — tự comment lên Facebook'
+        const onStop = () => jobOn ? call({ type: 'JOB_STOP' }, { okMsg: 'Đã dừng chiến dịch' }) : call({ type: 'STOP_AUTO' }, { okMsg: 'Đã dừng Auto' })
+        return (
+          <div className="fixed bottom-5 left-1/2 z-[90] -translate-x-1/2 flex items-center gap-3 rounded-full border border-emerald-500/30 bg-slate-900/95 py-2 pl-4 pr-2 shadow-2xl shadow-black/40 backdrop-blur">
+            <span className="flex items-center gap-2 text-xs font-bold text-emerald-300">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70" />
+                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+              </span>
+              {label}
             </span>
-            Auto đang chạy — tự comment lên Facebook
-          </span>
-          <button onClick={() => call({ type: 'STOP_AUTO' }, { okMsg: 'Đã dừng Auto' })}
-            className="rounded-full bg-red-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-red-500 transition-colors">
-            Dừng ngay
-          </button>
-        </div>
-      )}
+            <button onClick={onStop} className="rounded-full bg-red-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-red-500 transition-colors">
+              Dừng ngay
+            </button>
+          </div>
+        )
+      })()}
     </div>
   )
 }

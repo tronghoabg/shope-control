@@ -60,7 +60,11 @@ export default function Discover() {
   }
   const join = async (g) => {
     setJoiningId(g.groupId)
-    await call({ type: 'JOIN_GROUP', groupId: g.groupId }, { okMsg: `Đã tham gia ${g.name}`, errMsg: 'Tham gia lỗi', timeout: 30000 })
+    const r = await ext({ type: 'JOIN_GROUP', groupId: g.groupId }, 30000)
+    if (r?.ok) notify('green', `Đã tham gia ${g.name}`)
+    else if (r?.skipped) notify('blue', `Bỏ qua "${g.name}": nhóm bắt trả lời câu hỏi — cần vào tay`)
+    else notify('red', `Tham gia lỗi: ${r?.error || ''}`)
+    await refresh()
     setJoiningId(null)
   }
 
@@ -76,26 +80,28 @@ export default function Discover() {
     if (targets.length > 20 && !(await confirm(`Tham gia liên tục ${targets.length} nhóm dễ bị checkpoint Facebook. Bạn chắc chắn muốn tiếp tục?`, { confirmText: 'Tiếp tục' }))) return
     stopRef.current = false
     setBulk({ done: 0, total: targets.length, current: '' })
-    let ok = 0, fail = 0, consec = 0, stopped = ''
+    let ok = 0, fail = 0, skip = 0, consec = 0, stopped = ''
     for (let i = 0; i < targets.length; i++) {
       if (stopRef.current) break
       const g = targets[i]
       setBulk({ done: i, total: targets.length, current: g.name })
       const r = await ext({ type: 'JOIN_GROUP', groupId: g.groupId }, 30000)
       if (r?.ok) { ok++; consec = 0; setSelected(prev => { const n = new Set(prev); n.delete(g.groupId); return n }) }
+      else if (r?.skipped) { skip++; consec = 0; setSelected(prev => { const n = new Set(prev); n.delete(g.groupId); return n }) }   // nhóm bắt trả lời câu hỏi → bỏ qua, KHÔNG tính lỗi
       else { fail++; consec++ }
       await refresh()
       setBulk({ done: i + 1, total: targets.length, current: g.name })
       // Nhiều nhóm join lỗi liên tiếp → nghi Facebook chặn → tự dừng bảo vệ tài khoản.
       if (consec >= 3) { stopped = `Đã dừng: ${consec} nhóm lỗi liên tiếp — Facebook có thể đang chặn. Hãy kiểm tra tài khoản.`; notify('red', stopped); break }
-      if (i < targets.length - 1 && !stopRef.current) {
+      // Bỏ qua thì không cần chờ giãn cách (không gửi request tới FB)
+      if (i < targets.length - 1 && !stopRef.current && !r?.skipped) {
         const d = Math.max(20, Number(delay) || 60)   // sàn 20s chống checkpoint dù người dùng nhập sai
         const wait = Math.round((d + Math.random() * d * 0.5) * 1000)
         for (let t = 0; t < wait && !stopRef.current; t += 500) await sleep(500)
       }
     }
     setBulk(null)
-    if (!stopped) notify(fail ? 'blue' : 'green', `Đã gửi yêu cầu tham gia ${ok}/${targets.length} nhóm${fail ? ` · ${fail} nhóm lỗi/cần duyệt` : ''}`)
+    if (!stopped) notify(fail ? 'blue' : 'green', `Đã gửi yêu cầu tham gia ${ok}/${targets.length} nhóm${skip ? ` · bỏ qua ${skip} nhóm bắt trả lời câu hỏi` : ''}${fail ? ` · ${fail} nhóm lỗi/cần duyệt` : ''}`)
   }
 
   const selCount = [...selected].filter(id => joinable.some(g => g.groupId === id)).length
@@ -230,6 +236,7 @@ export default function Discover() {
                       <span className="font-semibold text-slate-205 text-xs truncate max-w-sm sm:max-w-md">{g.name}</span>
                       <Badge color={scoreColor(g.score)} className="text-[10px] px-1.5">{g.score == null ? 'Chờ chấm' : `${g.score}đ`}</Badge>
                       {g.niche && <Badge color="indigo" className="text-[10px] px-1.5">{g.niche}</Badge>}
+                      {(g.hasQuestions || g.needQuestions) && <Badge color="yellow" className="text-[10px] px-1.5" title="Nhóm bắt trả lời câu hỏi — bỏ qua khi tham gia hàng loạt, cần vào tay">❓ Cần trả lời câu hỏi</Badge>}
                       {g.url && (
                         <a href={g.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-slate-500 hover:text-indigo-400 h-6 w-6 rounded-lg hover:bg-slate-800 flex items-center justify-center">
                           <IconExternalLink size={12} />

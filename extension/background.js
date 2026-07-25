@@ -36,8 +36,9 @@ const DEFAULTS = {
 const HARD_AI_ERRORS = new Set(['AI_CAP', 'NO_SYSTEM_KEY', 'BANNED', 'RATE_LIMIT', 'TOO_LARGE', 'UNAUTHORIZED']);
 
 async function getCfg() {
-  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license', 'savedGroupLists', 'savedPosts', 'targetPages', 'savedPageLists', 'pageSearchResults', 'searchCursors', 'searchKeywords', 'searchHasMore', 'pageSearchCursors', 'pageSearchKeywords', 'pageHasMore']);
+  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license', 'savedGroupLists', 'savedPosts', 'targetPages', 'savedPageLists', 'pageSearchResults', 'searchCursors', 'searchKeywords', 'searchHasMore', 'pageSearchCursors', 'pageSearchKeywords', 'pageHasMore', 'job']);
   return {
+    job: s.job || null,   // chiến dịch đăng hàng loạt đang chạy nền (SW)
     savedGroupLists: s.savedGroupLists || [],   // [{ id, name, groupIds:[], createdAt }]
     savedPosts: s.savedPosts || [],             // [{ id, title, content, link, bgPresetId, createdAt }]
     targetPages: s.targetPages || [],           // [{ pageId, name, url, icon }] — page mục tiêu comment dạo
@@ -1050,6 +1051,109 @@ function serializeCommit(fn) {
   return p;
 }
 
+// ─── ĐĂNG HÀNG LOẠT CHẠY NỀN (service worker) ────────────────────────────────
+// Vòng lặp giãn cách chạy trong SW qua alarm → sống kể cả khi tab /app ẩn/đóng.
+const JOB_ALARM = 'shope_job';
+let _jobBusy = false;
+
+function swSpin(t) {
+  let out = String(t || ''), guard = 0;
+  while (/\{[^{}]*\}/.test(out) && guard++ < 6) out = out.replace(/\{([^{}]*)\}/g, (_, g) => { const o = g.split('|'); return o[Math.floor(Math.random() * o.length)]; });
+  return out;
+}
+function jobDelaySec(job) {
+  const lo = Math.max(MIN_DELAY_SEC, Math.min(job.delayMin, job.delayMax));
+  const hi = Math.max(lo, Math.max(job.delayMin, job.delayMax));
+  return lo + Math.floor(Math.random() * (hi - lo + 1));
+}
+
+// Đăng 1 item hàng chờ theo postId (dùng chung cho POST_ITEM thủ công + job nền).
+async function commitQueueItem(postId) {
+  return serializeCommit(async () => {
+    const { queue } = await getCfg();
+    const item = queue.find(it => it.postId === postId);
+    if (!item) return { ok: false, error: 'không thấy item trong hàng chờ' };
+    await save({ queue: queue.filter(it => it.postId !== postId) });
+    const res = await commitComment(item);
+    if (!res.ok) { const { queue: q2 } = await getCfg(); if (!q2.some(it => it.postId === item.postId)) await save({ queue: [item, ...q2] }); }
+    return { ...res, name: item.groupName || item.pageName || item.groupId || postId, url: item.permalink || '', comment: item.comment || '' };
+  });
+}
+
+async function runJobItem(job, id, cfg) {
+  if (job.kind === 'comment') {
+    const r = await commitQueueItem(id);
+    return { ok: r.ok, error: r.error || '', quotaBlocked: !!r.quotaBlocked, url: r.url || '' };
+  }
+  // postgroup: sinh nội dung (spintax + biến thể + AI viết lại) rồi đăng
+  const p = job.params || {};
+  const vs = (p.variants && p.variants.length) ? p.variants : [p.content || ''];
+  let message = swSpin(vs[job.idx % vs.length] || p.content || '');
+  if (p.useAi && message.trim()) {
+    try { const t = await aiRewrite(message); if (t) message = t; } catch {}
+  }
+  const r = await postToGroup(id, message, p.link || '', { bgPresetId: p.bgPresetId || '', images: p.images || [] });
+  return { ok: r.ok, error: r.ok ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), quotaBlocked: !!r.quotaBlocked, url: r.postUrl || '' };
+}
+
+async function startJob(kind, items, params = {}) {
+  const list = (items || []).filter(Boolean);
+  if (!list.length) throw new Error('Không có mục nào để chạy');
+  const st = await getCfg();
+  if (st.job && st.job.running) throw new Error('Đang có chiến dịch chạy nền — hãy dừng trước khi chạy cái mới.');
+  requireApiKey(st.cfg);
+  const delayMin = Math.max(MIN_DELAY_SEC, params.delayMin || st.cfg.minDelaySec || MIN_DELAY_SEC);
+  const delayMax = Math.max(delayMin, params.delayMax || st.cfg.maxDelaySec || delayMin);
+  const gname = {};
+  for (const g of st.discoveredGroups) gname[g.groupId] = g.name;
+  for (const g of (st.searchResults || [])) if (!gname[g.groupId]) gname[g.groupId] = g.name;
+  const results = list.map(id => {
+    let name = String(id), comment = '';
+    if (kind === 'comment') { const q = st.queue.find(x => x.postId === id); name = q?.groupName || q?.pageName || q?.groupId || String(id); comment = q?.comment || ''; }
+    else name = gname[id] || `Nhóm ${id}`;
+    return { id, name, status: 'pending', error: '', url: '', comment };
+  });
+  const job = { running: true, paused: false, kind, items: list, idx: 0, total: list.length, results, params, delayMin, delayMax, nextAt: 0, consec: 0, startedAt: Date.now(), stoppedMsg: '' };
+  await save({ job });
+  chrome.alarms.create(JOB_ALARM, { periodInMinutes: 0.5 });
+  jobStep();   // đăng item đầu ngay, không chờ tick
+  return job;
+}
+
+async function jobStep() {
+  if (_jobBusy) return;
+  _jobBusy = true;
+  try {
+    const st = await getCfg();
+    let job = st.job;
+    if (!job || !job.running) { await chrome.alarms.clear(JOB_ALARM); return; }
+    if (job.paused) return;
+    if (job.idx >= job.total) { job.running = false; job.finishedAt = Date.now(); await save({ job }); await chrome.alarms.clear(JOB_ALARM); return; }
+    if (job.nextAt && Date.now() < job.nextAt) return;   // đang chờ giãn cách
+
+    const curIdx = job.idx;
+    job.results = job.results.map((r, i) => i === curIdx ? { ...r, status: 'posting' } : r);
+    await save({ job });
+
+    let res;
+    try { res = await runJobItem(job, job.items[curIdx], st.cfg); } catch (e) { res = { ok: false, error: String(e?.message || e) }; }
+
+    let cur = (await getCfg()).job;
+    if (!cur || !cur.running) return;   // đã dừng trong lúc đăng
+    cur.results = cur.results.map((r, i) => i === curIdx ? { ...r, status: res.ok ? 'success' : 'error', error: res.error || '', url: res.url || r.url } : r);
+    if (res.quotaBlocked) { cur.running = false; cur.stoppedMsg = res.error || 'Hết hạn mức'; await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); await pushLog('error', `⛔ ${cur.stoppedMsg}`); return; }
+    cur.consec = res.ok ? 0 : (cur.consec || 0) + 1;
+    cur.idx = curIdx + 1;
+    // Tùy chọn "dừng ngay ở bài lỗi đầu tiên" (chỉ postgroup).
+    if (!res.ok && cur.params && cur.params.stopOnError) { cur.running = false; cur.stoppedMsg = 'Đã dừng ở mục lỗi đầu tiên (tùy chọn của bạn).'; await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); return; }
+    if (cur.consec >= 3) { cur.running = false; cur.stoppedMsg = 'Đã dừng: 3 mục lỗi liên tiếp — có thể Facebook đang chặn. Kiểm tra tài khoản trước khi chạy tiếp.'; await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); await pushLog('error', `⛔ ${cur.stoppedMsg}`); return; }
+    if (cur.idx >= cur.total) { cur.running = false; cur.finishedAt = Date.now(); await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); await pushLog('success', `✓ Xong chiến dịch nền: ${cur.results.filter(r => r.status === 'success').length}/${cur.total}`); return; }
+    cur.nextAt = Date.now() + jobDelaySec(cur) * 1000;
+    await save({ job: cur });
+  } catch (e) { console.warn('jobStep', e); }
+  finally { _jobBusy = false; }
+}
+
 // manual=true (bấm "Đăng 1 comment"): bỏ qua check auto/delay, đăng item đầu hàng đợi.
 function processOneStep(opts = {}) {
   return serializeCommit(() => _processOneStep(opts));
@@ -1387,13 +1491,28 @@ async function joinGroupById(groupId) {
   const creds = await getCreds();
   if (!creds.dtsg || !creds.uid) throw new Error('Chưa kết nối Facebook');
   const g = (searchResults || []).find(x => x.groupId === groupId) || { groupId };
+
+  // Nhóm bắt trả lời câu hỏi (đã biết từ lúc tìm) → BỎ QUA luôn, không gửi yêu cầu (an toàn, không tạo yêu cầu thiếu đáp án).
+  if (g.hasQuestions) {
+    await pushLog('info', `⏭ Bỏ qua: nhóm "${g.name || groupId}" bắt trả lời câu hỏi — cần vào tay.`);
+    const sr = (searchResults || []).map(x => x.groupId === groupId ? { ...x, skipped: true, needQuestions: true } : x);
+    await save({ searchResults: sr });
+    return { ok: false, skipped: true, needQuestions: true };
+  }
+
   const res = await self.ShopeFbApi.fbJoinGroup(runFetchInFbTab, creds, g);
   if (res.ok) {
     const sr = (searchResults || []).map(x => x.groupId === groupId ? { ...x, joined: true } : x);
     await save({ searchResults: sr });
     await pushLog('success', `➕ Đã tham gia nhóm: ${g.name || groupId}`);
+  } else if (res.needQuestions) {
+    // Phát hiện lúc gửi: nhóm bắt trả lời câu hỏi → bỏ qua, KHÔNG tính là lỗi.
+    await pushLog('info', `⏭ Bỏ qua: nhóm "${g.name || groupId}" bắt trả lời câu hỏi — cần vào tay.`);
+    const sr = (searchResults || []).map(x => x.groupId === groupId ? { ...x, skipped: true, needQuestions: true } : x);
+    await save({ searchResults: sr });
+    return { ok: false, skipped: true, needQuestions: true };
   } else {
-    await pushLog('error', `Tham gia nhóm lỗi: ${JSON.stringify(res.errors || '')}`);
+    await pushLog('error', `Tham gia nhóm lỗi: ${res.error || JSON.stringify(res.errors || '')}`);
   }
   return res;
 }
@@ -1413,6 +1532,7 @@ function notify(title, message) {
 // ─── Alarm tick ──────────────────────────────────────────────────────────────
 chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name === TICK_ALARM) { try { await processOneStep(); } catch (e) { console.warn(e); } }
+  else if (a.name === JOB_ALARM) { try { await jobStep(); } catch (e) { console.warn(e); } }
 });
 
 // Bấm icon extension → mở (hoặc focus) control panel tại {webBase}/app
@@ -1489,8 +1609,10 @@ async function bootstrap() {
   await installShopeeDnr();
   await installFbDnr();
   try {
-    const { cfg } = await getCfg();
+    const { cfg, job } = await getCfg();
     if (cfg.autoEnabled && !cfg.killSwitch) chrome.alarms.create(TICK_ALARM, { periodInMinutes: 0.5 });
+    // Chiến dịch đăng nền còn dở → tạo lại alarm để chạy tiếp sau khi mở lại Chrome / reload extension.
+    if (job && job.running) chrome.alarms.create(JOB_ALARM, { periodInMinutes: 0.5 });
   } catch {}
 }
 chrome.runtime.onInstalled.addListener(bootstrap);
@@ -1660,7 +1782,7 @@ async function handle(request, sendResponse) {
         sendResponse({ ok: true, queued: total });
         break;
       }
-      case 'JOIN_GROUP': { const res = await joinGroupById(request.groupId); sendResponse({ ok: res.ok, error: res.ok ? '' : JSON.stringify(res.errors || 'join_failed') }); break; }
+      case 'JOIN_GROUP': { const res = await joinGroupById(request.groupId); sendResponse({ ok: res.ok, skipped: !!res.skipped, needQuestions: !!res.needQuestions, error: res.ok || res.skipped ? '' : (res.error || JSON.stringify(res.errors || 'join_failed')) }); break; }
       case 'POST_GROUP': { const r = await postToGroup(request.groupId, request.message || '', request.link || '', { bgPresetId: request.bgPresetId || '', images: request.images || [] }); sendResponse({ ok: r.ok, error: r.ok ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), postUrl: r.postUrl || '', quotaBlocked: !!r.quotaBlocked }); break; }
       case 'AI_REWRITE': { try { const t = await aiRewrite(request.text || ''); sendResponse({ ok: !!t, text: t, error: t ? '' : 'AI không trả về nội dung' }); } catch (e) { sendResponse({ ok: false, error: String(e?.message || e) }); } break; }
       case 'GET_GROUPS': { const { discoveredGroups, groupsSyncedAt } = await getCfg(); sendResponse({ ok: true, groups: discoveredGroups, syncedAt: groupsSyncedAt }); break; }
@@ -1724,11 +1846,11 @@ async function handle(request, sendResponse) {
         const title = String(p.title || (p.content || '').trim().split('\n')[0] || 'Bài không tên').slice(0, 80);
         // Có id + tồn tại → CẬP NHẬT tại chỗ (không tạo bản trùng). Ngược lại tạo mới.
         if (p.id && savedPosts.some(x => x.id === p.id)) {
-          const updated = savedPosts.map(x => x.id === p.id ? { ...x, title, content: p.content || '', link: p.link || '', bgPresetId: p.bgPresetId || '' } : x);
+          const updated = savedPosts.map(x => x.id === p.id ? { ...x, title, content: p.content || '', link: p.link || '', bgPresetId: p.bgPresetId || '', ...(p.images !== undefined ? { images: p.images || [] } : {}) } : x);
           await save({ savedPosts: updated });
           sendResponse({ ok: true, post: updated.find(x => x.id === p.id), updated: true });
         } else {
-          const post = { id: 'pp_' + Date.now().toString(36), title, content: p.content || '', link: p.link || '', bgPresetId: p.bgPresetId || '', createdAt: Date.now() };
+          const post = { id: 'pp_' + Date.now().toString(36), title, content: p.content || '', link: p.link || '', bgPresetId: p.bgPresetId || '', images: p.images || [], createdAt: Date.now() };
           await save({ savedPosts: [post, ...savedPosts].slice(0, 100) });
           sendResponse({ ok: true, post, updated: false });
         }
@@ -1774,22 +1896,21 @@ async function handle(request, sendResponse) {
       case 'REJECT_ITEM': await mutateQueue(q => q.filter(it => it.postId !== request.postId)); sendResponse({ ok: true }); break;
       case 'EDIT_ITEM': await mutateQueue(q => q.map(it => it.postId === request.postId ? { ...it, comment: request.comment } : it)); sendResponse({ ok: true }); break;
       case 'POST_ITEM': {
-        const r = await serializeCommit(async () => {
-          const { queue } = await getCfg();
-          const item = queue.find(it => it.postId === request.postId);
-          if (!item) return { ok: false, error: 'không thấy item' };
-          await save({ queue: queue.filter(it => it.postId !== request.postId) });
-          const res = await commitComment(item);
-          // Chưa đăng được (hết hạn mức, lỗi FB…) → trả item lại hàng đợi để không mất bài đã duyệt.
-          if (!res.ok) {
-            const { queue: q2 } = await getCfg();
-            if (!q2.some(it => it.postId === item.postId)) await save({ queue: [item, ...q2] });
-          }
-          return res;
-        });
+        const r = await commitQueueItem(request.postId);
         sendResponse({ ok: r.ok, error: r.error, quotaBlocked: !!r.quotaBlocked, result: r });
         break;
       }
+      // ── Đăng hàng loạt CHẠY NỀN (service worker) ──
+      case 'START_JOB': {
+        try { const j = await startJob(request.kind, request.items, request.params || {}); sendResponse({ ok: true, job: j }); }
+        catch (e) { sendResponse({ ok: false, error: String(e?.message || e) }); }
+        break;
+      }
+      case 'JOB_STOP': { const { job } = await getCfg(); if (job) await save({ job: { ...job, running: false, paused: false, stoppedMsg: job.stoppedMsg || 'Đã dừng theo yêu cầu.' } }); await chrome.alarms.clear(JOB_ALARM); sendResponse({ ok: true }); break; }
+      case 'JOB_PAUSE': { const { job } = await getCfg(); if (job?.running) await save({ job: { ...job, paused: true } }); sendResponse({ ok: true }); break; }
+      case 'JOB_RESUME': { const { job } = await getCfg(); if (job?.running) { await save({ job: { ...job, paused: false } }); jobStep(); } sendResponse({ ok: true }); break; }
+      case 'JOB_SKIP_WAIT': { const { job } = await getCfg(); if (job?.running && !job.paused) { await save({ job: { ...job, nextAt: 0 } }); jobStep(); } sendResponse({ ok: true }); break; }
+      case 'JOB_CLEAR': { const { job } = await getCfg(); if (!job || !job.running) await save({ job: null }); sendResponse({ ok: true }); break; }
       case 'MAKE_LINKS': {
         const links = (request.links || []).map(s => String(s || '').trim()).filter(Boolean);
         if (!links.length) { sendResponse({ ok: false, error: 'Chưa nhập link nào' }); break; }

@@ -451,6 +451,7 @@ async function fbSearchGroups(runFetch, creds, keyword, cursor) {
       memberCount: extractMemberCount(scope),
       privacy, url: `https://www.facebook.com/groups/${id}`,
       joinState, joined: /MEMBER|JOINED/i.test(joinState),
+      hasQuestions: hasNonEmptyQuestionnaire(scope),   // nhóm bắt trả lời câu hỏi (nếu FB có trả trong kết quả tìm)
     };
   });
   return { groups, nextCursor: extractEndCursor(json) };
@@ -462,6 +463,23 @@ async function fbSearchGroups(runFetch, creds, keyword, cursor) {
 const JOIN = { FRIENDLY_NAME: 'GroupCometJoinForumMutation', DOC_ID: '27095583533431012' };
 function groupAttrib(groupId) {
   return `CometGroupDiscussionRoot.react,comet.group,unexpected,${Date.now()},0,${groupId},,`;
+}
+// Deep-scan tìm bộ câu hỏi vào nhóm CÓ NỘI DUNG (khác null/rỗng) → nhóm bắt trả lời câu hỏi.
+function hasNonEmptyQuestionnaire(obj) {
+  let found = false;
+  const visit = (o) => {
+    if (found || !o || typeof o !== 'object') return;
+    if (Array.isArray(o)) { for (const x of o) visit(x); return; }
+    for (const k in o) {
+      const v = o[k];
+      if (/questionnaire|membership_question|join_question/i.test(k) && v != null) {
+        if (v === true || (Array.isArray(v) ? v.length > 0 : (typeof v === 'object' ? Object.keys(v).length > 0 : !!v))) { found = true; return; }
+      }
+      if (v && typeof v === 'object') visit(v);
+    }
+  };
+  visit(obj);
+  return found;
 }
 async function fbJoinGroup(runFetch, creds, group) {
   const gid = String(group.groupId || group.id);
@@ -478,7 +496,15 @@ async function fbJoinGroup(runFetch, creds, group) {
     __relay_internal__pv__GroupsCometGYSJUnifiedUnitCardImageHeightrelayprovider: 150,
     __relay_internal__pv__GroupsCometGroupChatLazyLoadLastMessageSnippetrelayprovider: false,
   };
-  const json = await gql(runFetch, creds, JOIN.FRIENDLY_NAME, JOIN.DOC_ID, vars);
+  // Lấy RAW để tự chẩn đoán (không để parseFbJson ném lỗi che mất trường hợp "cần trả lời câu hỏi").
+  const raw = await gqlText(runFetch, creds, JOIN.FRIENDLY_NAME, JOIN.DOC_ID, vars);
+  let json = null, parseErr = '';
+  try { json = parseFbJson(raw); } catch (e) { parseErr = e?.message || String(e); }
+  // Nhóm bắt trả lời câu hỏi → báo needQuestions (để tầng trên BỎ QUA, không tính lỗi).
+  const errMsg = json?.errors?.[0]?.message || parseErr || '';
+  const needQuestions = /question(naire)?/i.test(errMsg) || hasNonEmptyQuestionnaire(json?.data);
+  if (needQuestions) return { ok: false, needQuestions: true, errors: json?.errors || null };
+  if (parseErr) return { ok: false, error: parseErr };
   return { ok: !!json?.data && !json?.errors, raw: json?.data || null, errors: json?.errors || null };
 }
 

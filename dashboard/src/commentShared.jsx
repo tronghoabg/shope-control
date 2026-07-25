@@ -32,79 +32,34 @@ export function QueueItem({ it, onAct, selected, onSel }) {
   )
 }
 
-// Hook đăng hàng loạt (giãn cách ≥90s, có nút dừng). Dùng chung cho 2 trang comment.
+// Hook đăng hàng loạt — điều khiển chiến dịch CHẠY NỀN trong service worker (sống khi tab ẩn/đóng).
+// UI chỉ khởi chạy + hiển thị tiến trình đọc từ state.job.
 export function usePoster() {
   const { s, notify, refresh } = useShope()
-  const [posting, setPosting] = useState(false)
-  const [paused, setPaused] = useState(false)
-  const [pstat, setPstat] = useState({ done: 0, total: 0, wait: 0 })
-  const [results, setResults] = useState([])
-  const stopRef = useRef(false)
-  const skipRef = useRef(false)   // bỏ chờ delay, đăng bài kế tiếp ngay
-  const pauseRef = useRef(false)
-  const cfg = s?.cfg || {}
-  const MAX_CONSEC_FAIL = 3       // nhiều lỗi liên tiếp = nghi checkpoint → tự dừng
-
-  // Cảnh báo nếu người dùng đóng/tải lại tab khi đang đăng (vòng lặp chạy trong tab).
+  const job = (s?.job && s.job.kind === 'comment') ? s.job : null
+  const [nowTs, setNowTs] = useState(Date.now())
   useEffect(() => {
-    if (!posting) return
-    const h = (e) => { e.preventDefault(); e.returnValue = '' }
-    window.addEventListener('beforeunload', h)
-    return () => window.removeEventListener('beforeunload', h)
-  }, [posting])
+    if (!job?.running || job?.paused) return
+    const t = setInterval(() => setNowTs(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [job?.running, job?.paused])
 
-  const post = async (ids, afterEach) => {
-    if (!ids.length) return notify('red', 'Chưa chọn bài nào')
-    
-    // Initialize results from queue
-    const initialResults = ids.map(id => {
-      const q = s.queue?.find(x => x.postId === id) || {}
-      return { id, name: q.groupName || q.pageName || q.groupId || id, comment: q.comment, status: 'pending', url: q.permalink || q.link || q.url }
-    })
-    setResults(initialResults)
-    
-    setPosting(true); stopRef.current = false; pauseRef.current = false; setPaused(false); setPstat({ done: 0, total: ids.length, wait: 0 })
-    let ok = 0, fail = 0, consec = 0, stoppedReason = ''
-    for (let i = 0; i < ids.length; i++) {
-      if (stopRef.current) break
-      while (pauseRef.current && !stopRef.current) await sleep(300)   // tạm dừng
-      if (stopRef.current) break
+  const posting = !!job?.running
+  const paused = !!job?.paused
+  const results = job?.results || []
+  const waitLeft = job?.nextAt ? Math.max(0, Math.ceil((job.nextAt - nowTs) / 1000)) : 0
+  const pstat = { done: job?.idx || 0, total: job?.total || 0, wait: posting && !paused ? waitLeft : 0 }
 
-      setResults(prev => prev.map(r => r.id === ids[i] ? { ...r, status: 'posting' } : r))
-
-      let r
-      try { r = await ext({ type: 'POST_ITEM', postId: ids[i] }, 60000) } catch (e) { r = { ok: false, error: String(e?.message || e) } }
-
-      setResults(prev => prev.map(res => res.id === ids[i] ? { ...res, status: r?.ok ? 'success' : 'error', error: r?.error, url: r?.result?.permalink || res.url } : res))
-
-      if (r?.quotaBlocked) { stoppedReason = r.error || 'Hết hạn mức hôm nay'; notify('red', stoppedReason); break }
-      if (r?.ok) { ok++; consec = 0 } else { fail++; consec++ }
-      afterEach?.(ids[i])
-      setPstat(p => ({ ...p, done: i + 1 })); refresh()
-      // Nhiều lỗi liên tiếp → nghi Facebook chặn/checkpoint → tự dừng để bảo vệ tài khoản.
-      if (consec >= MAX_CONSEC_FAIL) {
-        stoppedReason = `Đã dừng: ${consec} bài lỗi liên tiếp — có thể Facebook đang chặn. Hãy kiểm tra tài khoản trước khi chạy tiếp.`
-        notify('red', stoppedReason); break
-      }
-      if (i < ids.length - 1 && !stopRef.current) {
-        const lo = Math.max(MIN_DELAY, Math.min(cfg.minDelaySec, cfg.maxDelaySec)), hi = Math.max(lo, Math.max(cfg.minDelaySec, cfg.maxDelaySec))
-        let secs = lo + Math.floor(Math.random() * (hi - lo + 1))
-        skipRef.current = false
-        for (; secs > 0 && !stopRef.current && !skipRef.current; secs--) {
-          while (pauseRef.current && !stopRef.current) await sleep(300)   // tạm dừng ngay cả khi đang đếm ngược
-          if (stopRef.current) break
-          setPstat(p => ({ ...p, wait: secs })); await sleep(1000)
-        }
-        setPstat(p => ({ ...p, wait: 0 }))
-      }
-    }
-    setPosting(false); setPaused(false); pauseRef.current = false; setPstat({ done: 0, total: 0, wait: 0 })
-    if (!stoppedReason) notify(fail ? 'blue' : 'green', `Đã đăng ${ok}/${ids.length} bài`)
+  const post = async (ids) => {
+    if (!ids?.length) return notify('red', 'Chưa chọn bài nào')
+    const r = await ext({ type: 'START_JOB', kind: 'comment', items: ids })
+    if (!r?.ok) notify('red', r?.error || 'Không khởi chạy được chiến dịch')
+    else { notify('green', `Đã bắt đầu rải ${ids.length} bài — chạy nền, có thể đóng tab.`); refresh() }
   }
-  const stop = () => { stopRef.current = true; pauseRef.current = false; setPaused(false); notify('blue', 'Đang dừng…') }
-  const skipWait = () => { skipRef.current = true }
-  const pause = () => { pauseRef.current = true; setPaused(true) }
-  const resume = () => { pauseRef.current = false; setPaused(false) }
+  const stop = () => { ext({ type: 'JOB_STOP' }).then(refresh); notify('blue', 'Đang dừng…') }
+  const pause = () => ext({ type: 'JOB_PAUSE' }).then(refresh)
+  const resume = () => ext({ type: 'JOB_RESUME' }).then(refresh)
+  const skipWait = () => ext({ type: 'JOB_SKIP_WAIT' }).then(refresh)
   return { posting, paused, pstat, results, post, stop, skipWait, pause, resume }
 }
 

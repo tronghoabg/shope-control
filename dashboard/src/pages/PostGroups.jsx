@@ -48,24 +48,22 @@ export default function PostGroups() {
   const [stopOnError, setStopOnError] = useState(false)
   const [dMin, setDMin] = useState(Math.max(MIN_DELAY, s?.cfg?.minDelaySec ?? 120))
   const [dMax, setDMax] = useState(Math.max(MIN_DELAY, s?.cfg?.maxDelaySec ?? 240))
-  const [running, setRunning] = useState(false)
-  const [results, setResults] = useState([])
-  const [wait, setWait] = useState(0)
-  const stopRef = useRef(false)
-  const skipWaitRef = useRef(false)   // bỏ chờ delay → đăng nhóm kế tiếp ngay
-  const pausedRef = useRef(false)
-  const [paused, setPaused] = useState(false)
   const fileRef = useRef(null)
-  const pauseRun = () => { pausedRef.current = true; setPaused(true) }
-  const resumeRun = () => { pausedRef.current = false; setPaused(false) }
 
-  // Cảnh báo khi rời/tải lại trang lúc đang đăng (vòng lặp chạy trong tab, đóng tab là dừng).
+  // Chiến dịch đăng bài CHẠY NỀN (service worker) — tiến trình đọc từ state.job.
+  const job = (s?.job && s.job.kind === 'postgroup') ? s.job : null
+  const running = !!job?.running
+  const paused = !!job?.paused
+  const results = job?.results || []
+  const [nowTs, setNowTs] = useState(Date.now())
   useEffect(() => {
-    if (!running) return
-    const h = (e) => { e.preventDefault(); e.returnValue = '' }
-    window.addEventListener('beforeunload', h)
-    return () => window.removeEventListener('beforeunload', h)
-  }, [running])
+    if (!running || paused) return
+    const t = setInterval(() => setNowTs(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [running, paused])
+  const wait = (running && !paused && job?.nextAt) ? Math.max(0, Math.ceil((job.nextAt - nowTs) / 1000)) : 0
+  const pauseRun = () => ext({ type: 'JOB_PAUSE' }).then(refresh)
+  const resumeRun = () => ext({ type: 'JOB_RESUME' }).then(refresh)
 
   const pool = useMemo(() => {
     const m = new Map()
@@ -107,7 +105,7 @@ export default function PostGroups() {
   // Lưu: nếu đang mở 1 bài mẫu → CẬP NHẬT tại chỗ (gửi kèm id); nếu không → tạo mới.
   const savePost = async () => {
     if (!content.trim()) return notify('red', 'Chưa có nội dung để lưu')
-    const r = await ext({ type: 'SAVE_POST', post: { id: editingId || undefined, content, link: link.trim(), bgPresetId: bgDisabled ? '' : bg } })
+    const r = await ext({ type: 'SAVE_POST', post: { id: editingId || undefined, content, link: link.trim(), bgPresetId: bgDisabled ? '' : bg, images: images.map(im => im.url) } })
     refresh()
     if (r?.post?.id) setEditingId(r.post.id)
     notify('green', editingId ? 'Đã cập nhật bài mẫu' : 'Đã lưu bài mẫu mới')
@@ -115,9 +113,10 @@ export default function PostGroups() {
   const loadSaved = (id) => {
     const p = savedPosts.find(x => x.id === id); if (!p) return
     setContent(p.content || ''); setLink(p.link || ''); setBg(p.bgPresetId || ''); setEditingId(p.id)
+    setImages((p.images || []).map((url, i) => ({ name: `Ảnh ${i + 1}`, url })))
     notify('blue', `Đã mở bài mẫu "${p.title}" để chỉnh sửa`)
   }
-  const newPost = () => { setEditingId(''); setContent(''); setLink(''); setBg(''); notify('blue', 'Đã tạo bài mới') }
+  const newPost = () => { setEditingId(''); setContent(''); setLink(''); setBg(''); setImages([]); notify('blue', 'Đã tạo bài mới') }
   const delSaved = async () => {
     if (!editingPost) return
     if (!(await confirm(`Xoá bài mẫu "${editingPost.title}"?`, { danger: true, confirmText: 'Xoá' }))) return
@@ -126,72 +125,24 @@ export default function PostGroups() {
   }
 
   async function run() {
-    const ids = [...sel]
+    let ids = [...sel]
     if (!ids.length) return notify('red', 'Chưa chọn nhóm nào')
     if (!content.trim() && !images.length) return notify('red', 'Chưa có nội dung hoặc ảnh')
     // Xác nhận trước hành động không hoàn tác được (đăng bài thật lên nhiều nhóm) + ước tính thời gian.
     const loS = Math.max(MIN_DELAY, Math.min(dMin, dMax)), hiS = Math.max(loS, Math.max(dMin, dMax))
     const avg = (loS + hiS) / 2
     const estMin = Math.round(((ids.length - 1) * avg + ids.length * 8) / 60)
-    if (!(await confirm(`Đăng bài lên ${ids.length} nhóm · giãn cách ${loS}–${hiS}s/bài · ước tính ~${estMin} phút.\n\nBài đăng là thật và không thể thu hồi tự động. Tiếp tục?`, { title: 'Xác nhận đăng bài', confirmText: 'Đăng ngay' }))) return
+    if (!(await confirm(`Đăng bài lên ${ids.length} nhóm · giãn cách ${loS}–${hiS}s/bài · ước tính ~${estMin} phút.\n\nBài chạy NỀN nên có thể đóng tab. Bài đăng là thật và không thể thu hồi tự động. Tiếp tục?`, { title: 'Xác nhận đăng bài', confirmText: 'Đăng ngay' }))) return
     if (randomize) shuffle(ids)
-    let bag = []
-    const pickVar = () => {
-      if (!hasVar) return content
-      if (!bag.length) bag = shuffle(variants.map((_, i) => i))
-      return variants[bag.pop()]
-    }
-    const imgUrls = images.map(im => im.url)
-
-    setRunning(true); stopRef.current = false; pausedRef.current = false; setPaused(false)
-    setResults(ids.map(id => ({ id, name: nameMap[id] || id, status: 'pending' })))
-    let ok = 0, fail = 0, consec = 0, stoppedMsg = ''
-    for (let i = 0; i < ids.length; i++) {
-      if (stopRef.current) break
-      while (pausedRef.current && !stopRef.current) await sleep(300)   // tạm dừng
-      if (stopRef.current) break
-      const id = ids[i]
-      setResults(rs => rs.map(r => r.id === id ? { ...r, status: 'posting' } : r))
-      let message = spin(pickVar())
-      if (useAi && aiReady && message.trim()) {
-        try { const ar = await ext({ type: 'AI_REWRITE', text: message }, 60000); if (ar?.ok && ar.text) message = ar.text } catch {}
-      }
-      let r
-      try { r = await ext({ type: 'POST_GROUP', groupId: id, message, link: link.trim(), images: imgUrls, bgPresetId: bgDisabled ? '' : bg }, 180000) }
-      catch (e) { r = { ok: false, error: String(e?.message || e) } }
-
-      if (r?.quotaBlocked) {
-        setResults(rs => rs.map(x => x.id === id ? { ...x, status: 'error', error: r.error || 'Hết lượt' } : x))
-        stoppedMsg = r.error || 'Hết lượt đăng hôm nay'; notify('red', stoppedMsg); break
-      }
-      if (r?.ok) { ok++; consec = 0; setResults(rs => rs.map(x => x.id === id ? { ...x, status: 'success', url: r.postUrl } : x)) }
-      else {
-        fail++; consec++
-        setResults(rs => rs.map(x => x.id === id ? { ...x, status: 'error', error: r?.error || 'Lỗi' } : x))
-        if (stopOnError) { stoppedMsg = 'Đã dừng ở bài lỗi đầu tiên (tùy chọn của bạn).'; break }
-      }
-      // Nhiều bài lỗi liên tiếp → nghi Facebook chặn → tự dừng bảo vệ tài khoản.
-      if (consec >= MAX_CONSEC_FAIL) {
-        stoppedMsg = `Đã dừng: ${consec} bài lỗi liên tiếp — có thể Facebook đang chặn. Hãy kiểm tra tài khoản trước khi chạy tiếp.`
-        notify('red', stoppedMsg); break
-      }
-
-      if (i < ids.length - 1 && !stopRef.current) {
-        const lo = Math.max(MIN_DELAY, Math.min(dMin, dMax)), hi = Math.max(lo, Math.max(dMin, dMax))
-        let secs = lo + Math.floor(Math.random() * (hi - lo + 1))
-        skipWaitRef.current = false
-        for (; secs > 0 && !stopRef.current && !skipWaitRef.current; secs--) {
-          while (pausedRef.current && !stopRef.current) await sleep(300)
-          if (stopRef.current) break
-          setWait(secs); await sleep(1000)
-        }
-        setWait(0)
-      }
-    }
-    setRunning(false); setWait(0); pausedRef.current = false; setPaused(false)
-    if (!stoppedMsg) notify(fail ? 'blue' : 'green', `Hoàn tất: ${ok} thành công, ${fail} lỗi`)
+    // Vòng lặp + giãn cách do service worker lo → chạy tiếp cả khi tab ẩn/đóng.
+    const r = await ext({
+      type: 'START_JOB', kind: 'postgroup', items: ids,
+      params: { content, variants: hasVar ? variants : [content], link: link.trim(), images: images.map(im => im.url), bgPresetId: bgDisabled ? '' : bg, useAi: useAi && aiReady, delayMin: dMin, delayMax: dMax, stopOnError },
+    })
+    if (!r?.ok) notify('red', r?.error || 'Không khởi chạy được chiến dịch')
+    else { notify('green', `Đã bắt đầu đăng ${ids.length} nhóm — chạy nền, có thể đóng tab.`); refresh() }
   }
-  const stop = () => { stopRef.current = true; notify('blue', 'Đang dừng chiến dịch sau bài hiện tại…') }
+  const stop = () => { ext({ type: 'JOB_STOP' }).then(refresh); notify('blue', 'Đang dừng chiến dịch…') }
 
   const done = results.filter(r => r.status === 'success' || r.status === 'error').length
   const pct = results.length ? Math.round(done / results.length * 100) : 0
@@ -429,7 +380,7 @@ export default function PostGroups() {
                 <span className="flex items-center gap-2 text-xs font-semibold text-slate-405 font-mono">
                   {running ? (paused ? 'Đã tạm dừng' : wait ? `Đang nghỉ trễ ${wait} giây…` : 'Đang xử lý đăng…') : 'Đã hoàn thành'}
                   {running && wait > 0 && !paused && (
-                    <button onClick={() => { skipWaitRef.current = true }} className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-300 hover:bg-indigo-500/20 transition-colors">Bỏ chờ</button>
+                    <button onClick={() => ext({ type: 'JOB_SKIP_WAIT' })} className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-300 hover:bg-indigo-500/20 transition-colors">Bỏ chờ</button>
                   )}
                   {running && (
                     <button onClick={paused ? resumeRun : pauseRun}
