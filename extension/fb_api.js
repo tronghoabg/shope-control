@@ -714,4 +714,78 @@ async function fbFetchPageFeed(runFetch, creds, pageId, cursor, count) {
   return parsePageFeed(jsons, pageId);
 }
 
-self.ShopeFbApi = { fbFetchJoinedGroups, fbFetchGroupFeed, fbPostComment, fbSearchGroups, fbJoinGroup, fbCreateGroupPost, fbUploadPhoto, fbSearchPages, fbFetchPageFeed, FB_GRAPHQL_URL, _gql: gql };
+// ─────────────────────────────────────────────────────────────────────────────
+// 7) ĐỌC COMMENT của 1 bài (tìm khách) ✅ doc_id thật (CommentsListComponentsPaginationQuery)
+// ─────────────────────────────────────────────────────────────────────────────
+const POST_COMMENTS = { FRIENDLY_NAME: 'CommentsListComponentsPaginationQuery', DOC_ID: '28148854324717105' };
+// Deep-walk gom node comment: có id (base64 "comment:") + author + body.text.
+function parseComments(jsons) {
+  const arr = Array.isArray(jsons) ? jsons : [jsons];
+  const byId = new Map(); let nextCursor = null;
+  const walk = (o) => {
+    if (!o || typeof o !== 'object') return;
+    if (Array.isArray(o)) { for (const x of o) walk(x); return; }
+    const isComment = typeof o.id === 'string' && o.id.startsWith('Y29tbWVudDo')
+      && o.author && typeof o.author === 'object' && o.body && typeof o.body === 'object' && typeof o.body.text === 'string';
+    if (isComment && !byId.has(o.id)) {
+      const aid = o.author.id != null ? String(o.author.id) : '';
+      byId.set(o.id, {
+        commentId: o.id, authorName: o.author.name || '', authorId: aid,
+        authorUrl: o.author.url || (aid ? `https://www.facebook.com/${aid}` : ''),
+        text: o.body.text || '', createdAt: o.created_time ? o.created_time * 1000 : null,
+      });
+    }
+    if (o.page_info && o.page_info.end_cursor) nextCursor = o.page_info.end_cursor;
+    for (const k in o) { const v = o[k]; if (v && typeof v === 'object') walk(v); }
+  };
+  for (const j of arr) walk(j);
+  return { comments: [...byId.values()], nextCursor };
+}
+async function fbListPostComments(runFetch, creds, postId, cursor) {
+  const vars = {
+    commentsAfterCount: -1, commentsAfterCursor: cursor || null,
+    commentsBeforeCount: null, commentsBeforeCursor: null, commentsIntentToken: null,
+    feedLocation: 'POST_PERMALINK_DIALOG', focusCommentID: null, scale: 1, useDefaultActor: false,
+    id: feedbackIdOf(postId),
+  };
+  const text = await gqlText(runFetch, creds, POST_COMMENTS.FRIENDLY_NAME, POST_COMMENTS.DOC_ID, vars);
+  const jsons = parseFbJsonAll(text);
+  const err = jsons.find(j => j?.errors?.length)?.errors?.[0]?.message;
+  if (err && jsons.length === 1) throw new Error(err);
+  return parseComments(jsons);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8) ẨN COMMENT ✅ doc_id thật (CometUFIHideCommentMutation)
+// ─────────────────────────────────────────────────────────────────────────────
+const HIDE_COMMENT = { FRIENDLY_NAME: 'CometUFIHideCommentMutation', DOC_ID: '27488296064098098' };
+async function fbHideComment(runFetch, creds, commentId) {
+  const vars = {
+    input: {
+      comment_id: String(commentId), feedback_source: 2, hide_location: 'MENU', site: 'comet',
+      actor_id: creds.uid, client_mutation_id: rndId(), attribution_id_v2: ATTRIB,
+    },
+    feedLocation: 'POST_PERMALINK_DIALOG', useDefaultActor: false, scale: 1,
+    __relay_internal__pv__CometUFI_dedicated_comment_routable_dialog_gkrelayprovider: true,
+  };
+  const json = await gql(runFetch, creds, HIDE_COMMENT.FRIENDLY_NAME, HIDE_COMMENT.DOC_ID, vars);
+  return { ok: !!json?.data && !json?.errors, errors: json?.errors || null };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9) RỜI NHÓM ✅ doc_id thật (GroupCometLeaveForumMutation)
+// ─────────────────────────────────────────────────────────────────────────────
+const LEAVE = { FRIENDLY_NAME: 'GroupCometLeaveForumMutation', DOC_ID: '27087223784277669' };
+async function fbLeaveGroup(runFetch, creds, group) {
+  const gid = String(group.groupId || group.id);
+  const vars = {
+    input: { attribution_id_v2: groupAttrib(gid), group_id: gid, actor_id: creds.uid, client_mutation_id: rndId() },
+    inviteShortLinkKey: null, isChainingRecommendationUnit: false, ordering: ['viewer_added'], scale: 1, groupID: gid,
+    __relay_internal__pv__GroupsCometGYSJUnifiedUnitCardImageHeightrelayprovider: 150,
+    __relay_internal__pv__GroupsCometGroupChatLazyLoadLastMessageSnippetrelayprovider: false,
+  };
+  const json = await gql(runFetch, creds, LEAVE.FRIENDLY_NAME, LEAVE.DOC_ID, vars);
+  return { ok: !!json?.data && !json?.errors, errors: json?.errors || null };
+}
+
+self.ShopeFbApi = { fbFetchJoinedGroups, fbFetchGroupFeed, fbPostComment, fbSearchGroups, fbJoinGroup, fbCreateGroupPost, fbUploadPhoto, fbSearchPages, fbFetchPageFeed, fbListPostComments, fbHideComment, fbLeaveGroup, FB_GRAPHQL_URL, _gql: gql };
