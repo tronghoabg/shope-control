@@ -22,3 +22,12 @@ export function ext(payload, timeoutMs = 20000) {
     window.postMessage({ __shopeReq: true, id, payload }, '*')
   })
 }
+
+// Mở link Facebook: TÁI DÙNG tab facebook.com đang mở (điều hướng tab đó) thay vì luôn mở tab mới.
+// Fallback: nếu extension không xử lý được → mở tab mới như bình thường.
+export async function openFb(url, e) {
+  if (e) { e.preventDefault(); e.stopPropagation() }
+  if (!url) return
+  const r = await ext({ type: 'OPEN_FB_URL', url })
+  if (!r?.ok) window.open(url, '_blank', 'noopener')
+}

@@ -4,7 +4,7 @@ import {
   IconHistory, IconBookmark, IconListCheck, IconSettings, IconChevronRight, IconSearch, IconTrash
 } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
-import { ext } from '../ext.js'
+import { ext, openFb } from '../ext.js'
 import { Card, Btn, Badge, Textarea, Empty, Hint, Input, Field } from '../ui.jsx'
 import { QueueItem, usePoster, ProgressPanel } from '../commentShared.jsx'
 import { LogFeed } from '../LogPanel.jsx'
@@ -319,7 +319,7 @@ export default function CommentPages({ goto }) {
                           <Badge color="blue">{p.pageName || 'Page'}</Badge>
                           {p.already && <Badge color="gray">Đã comment trước đây</Badge>}
                           {p.permalink && (
-                            <a href={p.permalink} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-xs text-indigo-400 hover:underline inline-flex items-center gap-1">
+                            <a href={p.permalink} onClick={e => openFb(p.permalink, e)} className="text-xs text-indigo-400 hover:underline inline-flex items-center gap-1 cursor-pointer">
                               Xem bài gốc <IconExternalLink size={12} />
                             </a>
                           )}

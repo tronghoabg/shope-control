@@ -1741,6 +1741,24 @@ async function handle(request, sendResponse) {
   try {
     switch (request?.type) {
       case 'PING': sendResponse({ ok: true, version: chrome.runtime.getManifest().version }); break;
+      // Mở link Facebook: tái dùng 1 tab facebook.com đang mở (điều hướng tab đó) thay vì luôn mở tab mới.
+      case 'OPEN_FB_URL': {
+        const url = String(request.url || '');
+        if (!/^https?:\/\//.test(url)) { sendResponse({ ok: false, error: 'url không hợp lệ' }); break; }
+        try {
+          const working = (await chrome.storage.session.get('fbTabId')).fbTabId;   // tab ẩn đang chạy Auto → tránh đụng
+          const tabs = await chrome.tabs.query({ url: ['*://*.facebook.com/*'] });
+          const reuse = (tabs || []).find(t => t.id != null && t.id !== working) || null;
+          if (reuse) {
+            await chrome.tabs.update(reuse.id, { url, active: true });
+            if (reuse.windowId != null) await chrome.windows.update(reuse.windowId, { focused: true });
+          } else {
+            await chrome.tabs.create({ url, active: true });
+          }
+          sendResponse({ ok: true, reused: !!reuse });
+        } catch (e) { sendResponse({ ok: false, error: String(e?.message || e) }); }
+        break;
+      }
       case 'GET_STATE': sendResponse({ ok: true, ...(await getCfg()), conn: await getConn(), shopee: await getShopeeConn() }); break;
       case 'CONNECT_FB': sendResponse({ ok: true, conn: await connectFb() }); break;
       case 'CHECK_LICENSE': { const { cfg } = await getCfg(); const lic = await refreshLicense(cfg); sendResponse({ ok: true, license: lic }); break; }

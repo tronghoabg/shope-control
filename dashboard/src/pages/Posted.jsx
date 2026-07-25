@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { IconTrash, IconExternalLink, IconChecks, IconCloud, IconSearch, IconMessageCircle, IconEyeOff, IconUserSearch, IconClockHour4 } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
-import { ext } from '../ext.js'
+import { ext, openFb } from '../ext.js'
 import { Card, Btn, Badge, Empty, Input } from '../ui.jsx'
 
 const TYPES = [{ k: 'all', l: 'Tất cả' }, { k: 'post', l: 'Đăng bài' }, { k: 'social', l: 'Comment dạo' }, { k: 'comment', l: 'Rải link' }]
@@ -40,7 +40,7 @@ function LeadsPanel({ postId }) {
       {comments.map(c => (
         <div key={c.commentId} className={`flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-900/40 ${hidden.has(c.commentId) ? 'opacity-40 line-through' : ''}`}>
           <div className="min-w-0 flex-1">
-            <a href={c.authorUrl || '#'} target="_blank" rel="noreferrer" className="text-xs font-semibold text-indigo-300 hover:underline">{c.authorName || 'Ẩn danh'}</a>
+            <a href={c.authorUrl || '#'} onClick={(e) => c.authorUrl && openFb(c.authorUrl, e)} className="text-xs font-semibold text-indigo-300 hover:underline cursor-pointer">{c.authorName || 'Ẩn danh'}</a>
             <span className="text-xs text-slate-400"> — {c.text}</span>
           </div>
           {!hidden.has(c.commentId) && (
@@ -68,7 +68,7 @@ function Item({ h, pendStatus }) {
         {isPost && pendStatus && PEND[pendStatus] && <Badge color={PEND[pendStatus].color} className="text-[10px] px-1.5">{PEND[pendStatus].l}</Badge>}
         <span className="text-[11px] text-slate-500 font-mono font-semibold">{time ? new Date(time).toLocaleString('vi') : ''}</span>
         {h.permalink && (
-          <a href={h.permalink} target="_blank" rel="noreferrer" className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-indigo-400 hover:underline">
+          <a href={h.permalink} onClick={(e) => openFb(h.permalink, e)} className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-indigo-400 hover:underline cursor-pointer">
             <span>Xem bài gốc</span>
             <IconExternalLink size={13} />
           </a>

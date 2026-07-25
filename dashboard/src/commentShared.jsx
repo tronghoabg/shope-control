@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { IconSend, IconTrash, IconExternalLink, IconDeviceFloppy, IconCheck, IconX, IconRefresh, IconListNumbers } from '@tabler/icons-react'
 import { Card, Btn, Badge, Textarea } from './ui.jsx'
 import { useShope } from './ShopeContext.jsx'
-import { ext } from './ext.js'
+import { ext, openFb } from './ext.js'
 
 export const MIN_DELAY = 90   // an toàn checkpoint: không cho nhanh hơn 90s
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
@@ -19,7 +19,7 @@ export function QueueItem({ it, onAct, selected, onSel }) {
         {it.groupName && <Badge color="gray" className="max-w-[150px] truncate" title={it.groupName}>{it.groupName}</Badge>}
         {it.productName && <Badge color="blue">{it.productName}</Badge>}
         {it.link && <Badge color="indigo">có link</Badge>}
-        {it.permalink && <a href={it.permalink} target="_blank" rel="noreferrer" className="ml-auto inline-flex items-center gap-1 text-xs text-indigo-400 hover:underline"><IconExternalLink size={13} /> xem bài</a>}
+        {it.permalink && <a href={it.permalink} onClick={(e) => openFb(it.permalink, e)} className="ml-auto inline-flex items-center gap-1 text-xs text-indigo-400 hover:underline cursor-pointer"><IconExternalLink size={13} /> xem bài</a>}
       </div>
       <p className="mb-2 line-clamp-2 text-xs text-slate-500">📄 {it.text || '(không có nội dung)'}</p>
       <Textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Nội dung comment…" />
