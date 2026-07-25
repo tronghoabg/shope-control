@@ -34,16 +34,33 @@ export const TASKS: Record<string, TaskDef> = {
   classify: {
     build: (a) => {
       const mode = a.mode === 'social' ? 'social' : 'affiliate'
-      const system = mode === 'social'
-        ? `Bạn đánh giá bài đăng Facebook xem có hợp để BÌNH LUẬN DẠO (tự nhiên, thân thiện) không.
-HỢP: bài chia sẻ, khoe, hỏi đáp, xin ý kiến, kể chuyện đời thường, vui vẻ.
-KHÔNG hợp: tin buồn/tang lễ, chính trị, tôn giáo nhạy cảm, tranh cãi gay gắt, bài bán hàng, spam.
+      const seed = clip(a.seed, 600).trim()
+      let system: string
+      if (seed) {
+        // Có "nội dung tìm khách": người dùng đang CHÀO MỜI (dịch vụ/sản phẩm/công cụ) → chấm theo độ KHỚP đối tượng của lời mời đó.
+        system = `Bạn giúp tìm KHÁCH TIỀM NĂNG trên Facebook cho lời chào mời dưới đây.
+
+=== LỜI CHÀO MỜI (nội dung sẽ comment) ===
+${seed}
+=== HẾT ===
+
+Đánh giá bài đăng: người viết bài này có thể QUAN TÂM tới lời chào mời trên không?
+- TIỀM NĂNG (score cao) nếu người viết đúng ĐỐI TƯỢNG của lời mời — ví dụ nếu lời mời chào "công cụ/dịch vụ tìm khách, bán hàng, marketing" thì người ĐANG BÁN HÀNG / KINH DOANH / rao sản phẩm / tìm khách / than ế đều là TIỀM NĂNG; nếu lời mời bán 1 sản phẩm thì người HỎI MUA / cần món đó là tiềm năng.
+- KHÔNG tiềm năng (score thấp): tin buồn/tang lễ, chính trị/tôn giáo nhạy cảm, tranh cãi gay gắt, bài rác/vô nghĩa, hoặc rõ ràng KHÔNG liên quan lời mời.
+Đừng loại một bài chỉ vì nó là "bài bán hàng" — nếu lời mời nhắm tới người bán thì bài bán hàng chính là KHÁCH.
 Chỉ trả JSON: {"potential": bool, "score": 0-100, "intent": string, "reason": string ngắn}.`
-        : `Bạn là trợ lý đánh giá bài đăng Facebook cho người làm affiliate Shopee.
+      } else if (mode === 'social') {
+        system = `Bạn đánh giá bài đăng Facebook xem có hợp để BÌNH LUẬN DẠO (tự nhiên, thân thiện) không.
+HỢP: bài chia sẻ, khoe, hỏi đáp, xin ý kiến, kể chuyện đời thường, vui vẻ.
+KHÔNG hợp: tin buồn/tang lễ, chính trị, tôn giáo nhạy cảm, tranh cãi gay gắt, spam rác.
+Chỉ trả JSON: {"potential": bool, "score": 0-100, "intent": string, "reason": string ngắn}.`
+      } else {
+        system = `Bạn là trợ lý đánh giá bài đăng Facebook cho người làm affiliate Shopee.
 Xác định một bài đăng có "tiềm năng" để comment giới thiệu sản phẩm hay không.
 TIỀM NĂNG: hỏi mua/tư vấn, than thiếu món đồ, xin review, hỏi "shop nào", "ở đâu bán".
 KHÔNG tiềm năng: tin buồn, chính trị, tranh cãi, đã chốt đơn, bài bán hàng người khác, spam.
 Chỉ trả JSON: {"potential": bool, "score": 0-100, "intent": string, "reason": string ngắn}.`
+      }
       const user = `Nhóm: ${a.group || '(không rõ)'}\nBài:\n"""\n${clip(a.text, 2000)}\n"""`
       return { system, messages: [{ role: 'user', content: user }], maxTokens: 300, temperature: 0.2, json: true }
     },

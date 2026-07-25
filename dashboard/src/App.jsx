@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   IconLayoutDashboard, IconUsersGroup, IconListCheck, IconShoppingCart,
-  IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink, IconUserCircle, IconCrown, IconSend, IconBookmark, IconHelp, IconLogout, IconShieldLock, IconBuildingStore, IconTestPipe,
+  IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink, IconUserCircle, IconCrown, IconSend, IconBookmark, IconHelp, IconLogout, IconShieldLock, IconBuildingStore, IconTestPipe, IconActivity,
 } from '@tabler/icons-react'
 
 console.log('Cache buster', Date.now());
@@ -58,6 +58,7 @@ import { useShope } from './ShopeContext.jsx'
 import { Spinner, LogoMark } from './ui.jsx'
 import LogPanel from './LogPanel.jsx'
 import Overview from './pages/Overview.jsx'
+import Progress from './pages/Progress.jsx'
 import Discover from './pages/Discover.jsx'
 import Groups from './pages/Groups.jsx'
 import Pages from './pages/Pages.jsx'
@@ -75,6 +76,7 @@ import Guide from './pages/Guide.jsx'
 
 const NAV = [
   { key: 'overview', label: 'Tổng quan', icon: IconLayoutDashboard, render: (goto) => <Overview goto={goto} /> },
+  { key: 'progress', label: 'Tiến trình', icon: IconActivity, render: (goto) => <Progress goto={goto} /> },
   // VẬN HÀNH CHIẾN DỊCH
   { key: 'cmtgroups', label: 'Comment Nhóm', icon: IconUsersGroup, render: () => <CommentGroups /> },
   { key: 'cmtpages', label: 'Comment Fanpage', icon: IconBuildingStore, render: (goto) => <CommentPages goto={goto} /> },
@@ -97,7 +99,7 @@ const NAV = [
 
 const NAV_BY_KEY = Object.fromEntries(NAV.map(n => [n.key, n]))
 const SECTIONS = [
-  { title: null, keys: ['overview'] },
+  { title: null, keys: ['overview', 'progress'] },
   { title: 'Vận hành chiến dịch', keys: ['cmtgroups', 'cmtpages', 'postgroups'] },
   { title: 'Mục tiêu & Nguồn lực', keys: ['discover', 'groups', 'pages', 'catalog', 'saved'] },
   { title: 'Hệ thống & Báo cáo', keys: ['posted', 'logs', 'tools', 'settings', 'guide'] },
@@ -122,7 +124,7 @@ function StatusChip({ ok, icon: Icon, label, title, onClick }) {
 }
 
 // Trang mở tự do (không cần đăng nhập) để onboarding không bế tắc.
-const OPEN_KEYS = ['overview', 'guide', 'account', 'settings']
+const OPEN_KEYS = ['overview', 'progress', 'guide', 'account', 'settings']
 
 export default function App() {
   const { s, connected, aiReady, connectFb, account, call } = useShope()

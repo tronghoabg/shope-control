@@ -790,8 +790,8 @@ async function refillQueue(opts = {}) {
       continue;
     }
 
-    // 1) bài có tiềm năng không (theo mode)
-    const cls = await self.ShopeAI.classifyPost(cfg, post.text, groupId, cfg.mode);
+    // 1) bài có tiềm năng không (theo mode). Có "nội dung tìm khách" → classify nhắm đúng khách của lời mời đó.
+    const cls = await self.ShopeAI.classifyPost(cfg, post.text, groupId, cfg.mode, (cfg.seedContent || '').trim());
     if (!cls.potential || (cls.score || 0) < cfg.minScore) {
       await pushLog('info', `✕ bỏ qua (${cls.score || 0}đ): "${ex}…"`, { group: groupId, kind: 'post' });
       continue;
@@ -1268,7 +1268,9 @@ async function _processOneStep(opts = {}) {
   if (!queue.length) {
     try {
       const n = await refillQueue();
-      ({ queue } = await getCfg());
+      // Đọc lại CẢ state (refillQueue đã tăng groupIdx + lưu cursor) — nếu chỉ đọc queue thì
+      // state cũ sẽ ghi đè groupIdx → Auto kẹt quét mãi 1 nhóm. (Đây là bug "quét lại cùng nhóm".)
+      ({ queue, state } = await getCfg());
       if (!n) {
         await note('nopost', `🔎 Auto: chưa tìm thấy bài tiềm năng mới trong ${cfg.groupIds?.length || 0} nhóm mục tiêu — sẽ thử lại sau. (Kiểm tra đã chọn nhóm mục tiêu chưa?)`);
         await save({ state: { ...state, nextActionAt: Date.now() + rndDelaySec(cfg) * 1000 } });

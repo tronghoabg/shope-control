@@ -30,7 +30,7 @@ async function aiTask(cfg, task, args) {
 
 self.ShopeAI = {
   // Bài có tiềm năng để comment không (mode 'affiliate' | 'social')
-  classifyPost: (cfg, text, group, mode = 'affiliate') => aiTask(cfg, 'classify', { text, group, mode }),
+  classifyPost: (cfg, text, group, mode = 'affiliate', seed = '') => aiTask(cfg, 'classify', { text, group, mode, seed }),
 
   // Comment dạo: viết lại biến thể từ nội dung gốc (chống trùng)
   varySeedComment: (cfg, text, group, seed, tone) => aiTask(cfg, 'varySeed', { text, group, seed, tone }),
