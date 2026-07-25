@@ -1267,13 +1267,17 @@ async function _processOneStep(opts = {}) {
   // Hết hàng đợi → nạp thêm
   if (!queue.length) {
     try {
-      const n = await refillQueue();
-      // Đọc lại CẢ state (refillQueue đã tăng groupIdx + lưu cursor) — nếu chỉ đọc queue thì
-      // state cũ sẽ ghi đè groupIdx → Auto kẹt quét mãi 1 nhóm. (Đây là bug "quét lại cùng nhóm".)
+      // Quét LIÊN TIẾP nhiều nhóm cho tới khi tìm được bài (đọc feed là thao tác đọc — không cần chờ giữa các nhóm).
+      // refillQueue tự tăng groupIdx + lưu cursor mỗi lần → mỗi vòng quét 1 nhóm khác.
+      let n = 0;
+      const maxTries = Math.min(cfg.groupIds.length, 5);
+      for (let t = 0; t < maxTries; t++) { n = await refillQueue(); if (n) break; }
+      // Đọc lại CẢ state (groupIdx/cursor đã đổi) — nếu chỉ đọc queue thì state cũ ghi đè groupIdx → kẹt quét 1 nhóm.
       ({ queue, state } = await getCfg());
       if (!n) {
-        await note('nopost', `🔎 Auto: chưa tìm thấy bài tiềm năng mới trong ${cfg.groupIds?.length || 0} nhóm mục tiêu — sẽ thử lại sau. (Kiểm tra đã chọn nhóm mục tiêu chưa?)`);
-        await save({ state: { ...state, nextActionAt: Date.now() + rndDelaySec(cfg) * 1000 } });
+        // Đã quét mấy nhóm liền vẫn chưa có → chỉ chờ NGẮN rồi quét tiếp nhóm khác (KHÔNG chờ full 90–240s).
+        await note('nopost', `🔎 Auto: đã quét ${maxTries} nhóm chưa có bài phù hợp — sẽ tự quét tiếp các nhóm khác sau ~30s.`);
+        await save({ state: { ...state, nextActionAt: Date.now() + 30 * 1000 } });
         return { skipped: 'không có bài tiềm năng mới' };
       }
     } catch (e) {
