@@ -2045,6 +2045,14 @@ async function handle(request, sendResponse) {
       case 'APPROVE_ITEM': await mutateQueue(q => q.map(it => it.postId === request.postId ? { ...it, approved: true } : it)); sendResponse({ ok: true }); break;
       case 'APPROVE_ALL': await mutateQueue(q => q.map(it => ({ ...it, approved: true }))); sendResponse({ ok: true }); break;
       case 'REJECT_ITEM': await mutateQueue(q => q.filter(it => it.postId !== request.postId)); sendResponse({ ok: true }); break;
+      case 'CLEAR_QUEUE': {
+        // scope: 'group' (xoá bài comment nhóm) | 'page' (xoá bài page) | 'all'
+        const scope = request.scope || 'all';
+        await mutateQueue(q => scope === 'group' ? q.filter(it => it.isPage) : scope === 'page' ? q.filter(it => !it.isPage) : []);
+        const { queue } = await getCfg();
+        sendResponse({ ok: true, remaining: queue.length });
+        break;
+      }
       case 'EDIT_ITEM': await mutateQueue(q => q.map(it => it.postId === request.postId ? { ...it, comment: request.comment } : it)); sendResponse({ ok: true }); break;
       case 'POST_ITEM': {
         const r = await commitQueueItem(request.postId);

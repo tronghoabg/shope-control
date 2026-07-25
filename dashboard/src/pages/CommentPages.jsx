@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import {
   IconBuildingStore, IconDownload, IconPlayerStop, IconSend, IconTarget, IconExternalLink,
-  IconHistory, IconBookmark, IconListCheck, IconSettings, IconChevronRight, IconSearch
+  IconHistory, IconBookmark, IconListCheck, IconSettings, IconChevronRight, IconSearch, IconTrash
 } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
@@ -10,7 +10,7 @@ import { QueueItem, usePoster, ProgressPanel } from '../commentShared.jsx'
 import { LogFeed } from '../LogPanel.jsx'
 
 export default function CommentPages({ goto }) {
-  const { s, call, notify, account } = useShope()
+  const { s, call, notify, account, confirm } = useShope()
   const { posting, paused, pstat, results, post, stop, skipWait, pause, resume } = usePoster()
   const [pagePosts, setPagePosts] = useState([])
   const [selPP, setSelPP] = useState(() => new Set())
@@ -341,7 +341,13 @@ export default function CommentPages({ goto }) {
                 <h2 className="font-bold text-slate-100 text-sm">Hàng chờ duyệt comment ({queue.length} bài)</h2>
                 {selCount > 0 && <Badge color="indigo">Đã chọn {selCount}</Badge>}
               </div>
-              <div>
+              <div className="flex items-center gap-2">
+                {queue.length > 0 && !posting && (
+                  <Btn size="sm" variant="ghost" icon={IconTrash} className="text-red-400 hover:bg-red-500/5 border border-transparent hover:border-red-500/10"
+                    onClick={async () => { if (await confirm(`Xoá sạch ${queue.length} bài trong hàng chờ?`, { danger: true, confirmText: 'Xoá hàng chờ' })) call({ type: 'CLEAR_QUEUE', scope: 'page' }, { okMsg: 'Đã xoá hàng chờ' }) }}>
+                    Xoá hàng chờ
+                  </Btn>
+                )}
                 {posting
                   ? <Btn size="sm" variant="danger" icon={IconPlayerStop} onClick={stop}>Dừng {pstat.done}/{pstat.total}{pstat.wait ? ` (nghỉ ${pstat.wait}s)` : ''}</Btn>
                   : <Btn size="sm" variant="success" icon={IconSend} disabled={!selCount} onClick={() => {

@@ -19,7 +19,7 @@ const KINDS = [
 const scoreColor = (n) => n == null ? 'gray' : n >= 70 ? 'green' : n >= 40 ? 'yellow' : 'gray'
 
 export default function CommentGroups() {
-  const { s, call, setCfg, notify, account } = useShope()
+  const { s, call, setCfg, notify, account, confirm } = useShope()
   const { posting, paused, pstat, results, post, stop, skipWait, pause, resume } = usePoster()
   const [cfgL, setLocal] = useState(null)
   const [sel, setSel] = useState(() => new Set())
@@ -473,7 +473,13 @@ export default function CommentGroups() {
                 <h2 className="font-bold text-slate-100 text-sm">Hàng chờ bài viết ({queue.length} bài)</h2>
                 {selCount > 0 && <Badge color="indigo">Đã chọn {selCount}</Badge>}
               </div>
-              <div>
+              <div className="flex items-center gap-2">
+                {queue.length > 0 && !posting && (
+                  <Btn size="sm" variant="ghost" icon={IconTrash} className="text-red-400 hover:bg-red-500/5 border border-transparent hover:border-red-500/10"
+                    onClick={async () => { if (await confirm(`Xoá sạch ${queue.length} bài trong hàng chờ?`, { danger: true, confirmText: 'Xoá hàng chờ' })) call({ type: 'CLEAR_QUEUE', scope: 'group' }, { okMsg: 'Đã xoá hàng chờ' }) }}>
+                    Xoá hàng chờ
+                  </Btn>
+                )}
                 {posting
                   ? <Btn size="sm" variant="danger" icon={IconPlayerStop} onClick={stop}>Dừng {pstat.done}/{pstat.total}{pstat.wait ? ` (nghỉ ${pstat.wait}s)` : ''}</Btn>
                   : <Btn size="sm" variant="success" icon={IconSend} disabled={!selCount} onClick={() => {
