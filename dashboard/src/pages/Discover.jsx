@@ -29,9 +29,11 @@ export default function Discover() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [selected, setSelected] = useState(new Set())
   const [joiningId, setJoiningId] = useState(null)
-  const [bulk, setBulk] = useState(null)   // { done, total, current } khi đang join hàng loạt
   const [delay, setDelay] = useState(60)
-  const stopRef = useRef(false)
+  // Tham gia hàng loạt chạy NỀN (service worker) — sống khi chuyển trang / đóng tab.
+  const job = (s?.job && s.job.kind === 'join') ? s.job : null
+  const bulk = job?.running ? { done: job.idx, total: job.total, current: (job.results?.[Math.min(job.idx, job.total - 1)]?.name) || '' } : null
+  const busy = !!s?.job?.running
 
   const results = s?.searchResults || []
   const joinable = results.filter(g => !g.joined)
@@ -59,6 +61,7 @@ export default function Discover() {
     setLoadingMore(false)
   }
   const join = async (g) => {
+    if (busy) return notify('red', 'Đang có tiến trình nền chạy — hãy dừng nó trước.')
     setJoiningId(g.groupId)
     const r = await ext({ type: 'JOIN_GROUP', groupId: g.groupId }, 30000)
     if (r?.ok) notify('green', `Đã tham gia ${g.name}`)
@@ -73,36 +76,18 @@ export default function Discover() {
   const selectAll = () => setSelected(new Set(joinable.map(g => g.groupId)))
   const clearSel = () => setSelected(new Set())
 
-  // Tham gia hàng loạt
+  // Tham gia hàng loạt — CHẠY NỀN (service worker), xem tiến trình ở sidebar bên phải.
   const bulkJoin = async () => {
     const targets = joinable.filter(g => selected.has(g.groupId))
     if (!targets.length) return notify('red', 'Chưa chọn nhóm nào')
+    if (busy) return notify('red', 'Đang có tiến trình chạy nền — hãy dừng nó trước khi chạy cái mới.')
     if (targets.length > 20 && !(await confirm(`Tham gia liên tục ${targets.length} nhóm dễ bị checkpoint Facebook. Bạn chắc chắn muốn tiếp tục?`, { confirmText: 'Tiếp tục' }))) return
-    stopRef.current = false
-    setBulk({ done: 0, total: targets.length, current: '' })
-    let ok = 0, fail = 0, skip = 0, consec = 0, stopped = ''
-    for (let i = 0; i < targets.length; i++) {
-      if (stopRef.current) break
-      const g = targets[i]
-      setBulk({ done: i, total: targets.length, current: g.name })
-      const r = await ext({ type: 'JOIN_GROUP', groupId: g.groupId }, 30000)
-      if (r?.ok) { ok++; consec = 0; setSelected(prev => { const n = new Set(prev); n.delete(g.groupId); return n }) }
-      else if (r?.skipped) { skip++; consec = 0; setSelected(prev => { const n = new Set(prev); n.delete(g.groupId); return n }) }   // nhóm bắt trả lời câu hỏi → bỏ qua, KHÔNG tính lỗi
-      else { fail++; consec++ }
-      await refresh()
-      setBulk({ done: i + 1, total: targets.length, current: g.name })
-      // Nhiều nhóm join lỗi liên tiếp → nghi Facebook chặn → tự dừng bảo vệ tài khoản.
-      if (consec >= 3) { stopped = `Đã dừng: ${consec} nhóm lỗi liên tiếp — Facebook có thể đang chặn. Hãy kiểm tra tài khoản.`; notify('red', stopped); break }
-      // Bỏ qua thì không cần chờ giãn cách (không gửi request tới FB)
-      if (i < targets.length - 1 && !stopRef.current && !r?.skipped) {
-        const d = Math.max(20, Number(delay) || 60)   // sàn 20s chống checkpoint dù người dùng nhập sai
-        const wait = Math.round((d + Math.random() * d * 0.5) * 1000)
-        for (let t = 0; t < wait && !stopRef.current; t += 500) await sleep(500)
-      }
-    }
-    setBulk(null)
-    if (!stopped) notify(fail ? 'blue' : 'green', `Đã gửi yêu cầu tham gia ${ok}/${targets.length} nhóm${skip ? ` · bỏ qua ${skip} nhóm bắt trả lời câu hỏi` : ''}${fail ? ` · ${fail} nhóm lỗi/cần duyệt` : ''}`)
+    const d = Math.max(20, Number(delay) || 60)
+    const r = await ext({ type: 'START_JOB', kind: 'join', items: targets.map(g => g.groupId), params: { delayMin: d, delayMax: Math.round(d * 1.5) } })
+    if (!r?.ok) notify('red', r?.error || 'Không khởi chạy được')
+    else { notify('green', `Đã bắt đầu tham gia ${targets.length} nhóm — chạy nền, xem tiến trình ở panel bên phải (có thể đóng tab).`); refresh() }
   }
+  const stopBulk = () => ext({ type: 'JOB_STOP' }).then(refresh)
 
   const selCount = [...selected].filter(id => joinable.some(g => g.groupId === id)).length
 
@@ -188,8 +173,8 @@ export default function Discover() {
               onBlur={(e) => setDelay(Math.max(20, Number(e.target.value) || 60))} disabled={!!bulk}
               className="w-20 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs font-bold text-slate-100 outline-none focus:border-indigo-500" />
             {bulk
-              ? <Btn size="sm" variant="danger" icon={IconPlayerStop} onClick={() => { stopRef.current = true }}>Dừng gửi</Btn>
-              : <Btn size="sm" variant="success" icon={IconUsersPlus} disabled={selCount === 0} onClick={bulkJoin}>Tham gia nhóm hàng loạt</Btn>}
+              ? <Btn size="sm" variant="danger" icon={IconPlayerStop} onClick={stopBulk}>Dừng gửi</Btn>
+              : <Btn size="sm" variant="success" icon={IconUsersPlus} disabled={selCount === 0 || busy} title={busy ? 'Đang có tiến trình nền chạy' : ''} onClick={bulkJoin}>Tham gia nhóm hàng loạt</Btn>}
           </div>
 
           {bulk && (

@@ -1147,7 +1147,8 @@ function swSpin(t) {
   return out;
 }
 function jobDelaySec(job) {
-  const lo = Math.max(MIN_DELAY_SEC, Math.min(job.delayMin, job.delayMax));
+  const floor = job.floor || MIN_DELAY_SEC;   // join: 20s; comment/post: 90s
+  const lo = Math.max(floor, Math.min(job.delayMin, job.delayMax));
   const hi = Math.max(lo, Math.max(job.delayMin, job.delayMax));
   return lo + Math.floor(Math.random() * (hi - lo + 1));
 }
@@ -1170,6 +1171,10 @@ async function runJobItem(job, id, cfg) {
     const r = await commitQueueItem(id);
     return { ok: r.ok, error: r.error || '', quotaBlocked: !!r.quotaBlocked, url: r.url || '' };
   }
+  if (job.kind === 'join') {
+    const r = await joinGroupById(id);
+    return { ok: r.ok, skipped: !!r.skipped, error: r.ok || r.skipped ? '' : (r.error || 'join_failed'), url: `https://www.facebook.com/groups/${id}` };
+  }
   // postgroup: sinh nội dung (spintax + biến thể + AI viết lại) rồi đăng
   const p = job.params || {};
   const vs = (p.variants && p.variants.length) ? p.variants : [p.content || ''];
@@ -1185,20 +1190,22 @@ async function startJob(kind, items, params = {}) {
   const list = (items || []).filter(Boolean);
   if (!list.length) throw new Error('Không có mục nào để chạy');
   const st = await getCfg();
-  if (st.job && st.job.running) throw new Error('Đang có chiến dịch chạy nền — hãy dừng trước khi chạy cái mới.');
-  requireApiKey(st.cfg);
-  const delayMin = Math.max(MIN_DELAY_SEC, params.delayMin || st.cfg.minDelaySec || MIN_DELAY_SEC);
+  if (st.job && st.job.running) throw new Error('Đang có chiến dịch chạy nền — hãy DỪNG nó trước khi chạy cái mới.');
+  if (kind !== 'join') requireApiKey(st.cfg);   // join chỉ cần Facebook, không cần AI
+  const floor = kind === 'join' ? 20 : MIN_DELAY_SEC;   // join giãn cách tối thiểu 20s; comment/post 90s
+  const delayMin = Math.max(floor, params.delayMin || st.cfg.minDelaySec || floor);
   const delayMax = Math.max(delayMin, params.delayMax || st.cfg.maxDelaySec || delayMin);
   const gname = {};
   for (const g of st.discoveredGroups) gname[g.groupId] = g.name;
   for (const g of (st.searchResults || [])) if (!gname[g.groupId]) gname[g.groupId] = g.name;
   const results = list.map(id => {
-    let name = String(id), comment = '';
-    if (kind === 'comment') { const q = st.queue.find(x => x.postId === id); name = q?.groupName || q?.pageName || q?.groupId || String(id); comment = q?.comment || ''; }
+    let name = String(id), comment = '', url = '';
+    if (kind === 'comment') { const q = st.queue.find(x => x.postId === id); name = q?.groupName || q?.pageName || q?.groupId || String(id); comment = q?.comment || ''; url = q?.permalink || ''; }
+    else if (kind === 'join') { name = gname[id] || `Nhóm ${id}`; url = `https://www.facebook.com/groups/${id}`; }
     else name = gname[id] || `Nhóm ${id}`;
-    return { id, name, status: 'pending', error: '', url: '', comment };
+    return { id, name, status: 'pending', error: '', url, comment };
   });
-  const job = { running: true, paused: false, kind, items: list, idx: 0, total: list.length, results, params, delayMin, delayMax, nextAt: 0, consec: 0, startedAt: Date.now(), stoppedMsg: '' };
+  const job = { running: true, paused: false, kind, items: list, idx: 0, total: list.length, results, params, floor, delayMin, delayMax, nextAt: 0, consec: 0, startedAt: Date.now(), stoppedMsg: '' };
   await save({ job });
   chrome.alarms.create(JOB_ALARM, { periodInMinutes: 0.5 });
   jobStep();   // đăng item đầu ngay, không chờ tick
