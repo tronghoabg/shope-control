@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   IconLayoutDashboard, IconUsersGroup, IconListCheck, IconShoppingCart,
-  IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink, IconUserCircle, IconCrown, IconSend, IconBookmark, IconHelp, IconLogout, IconShieldLock, IconBuildingStore, IconTestPipe, IconActivity,
+  IconSettings, IconBrandFacebook, IconHistory, IconLock, IconPlugConnected, IconPlugConnectedX, IconCompass, IconChecks, IconLink, IconUserCircle, IconCrown, IconSend, IconBookmark, IconHelp, IconLogout, IconShieldLock, IconBuildingStore, IconTestPipe, IconActivity, IconLayoutSidebarRightExpand, IconLayoutSidebarRightCollapse,
 } from '@tabler/icons-react'
 
 console.log('Cache buster', Date.now());
@@ -233,13 +233,8 @@ export default function App() {
           </div>
         </a>
 
-        {/* Phải: nút Tiến trình + tài khoản Facebook */}
+        {/* Phải: tài khoản Facebook + nút mở/đóng panel Tiến trình (sát mép) */}
         <div className="flex items-center justify-end gap-3">
-          <button onClick={() => setSidebarOpen(v => !v)} title="Xem tiến trình (chạy nền)"
-            className="relative inline-flex items-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-xs font-bold text-slate-300 hover:bg-slate-800 transition-colors">
-            <IconActivity size={15} className={liveActive ? 'text-emerald-400' : 'text-slate-400'} /> Tiến trình
-            {liveActive && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950 animate-pulse" />}
-          </button>
           {conn?.connected ? (
             <div title={`Facebook: ${conn.name || conn.id}`}
               className="flex items-center gap-2 rounded-full border border-slate-800/80 bg-slate-900/30 py-1 pl-1 pr-3">
@@ -254,6 +249,12 @@ export default function App() {
               <IconBrandFacebook size={14} /> Kết nối Facebook
             </button>
           )}
+          {/* Nút mở/đóng panel Tiến trình — icon kiểu panel, sát mép phải */}
+          <button onClick={() => setSidebarOpen(v => !v)} title={sidebarOpen ? 'Đóng panel Tiến trình' : 'Mở panel Tiến trình'}
+            className={`relative grid h-9 w-9 place-items-center rounded-xl border transition-colors ${sidebarOpen ? 'border-indigo-500/40 bg-indigo-500/15 text-indigo-300' : 'border-slate-800 bg-slate-900/60 text-slate-300 hover:bg-slate-800'}`}>
+            {sidebarOpen ? <IconLayoutSidebarRightCollapse size={18} /> : <IconLayoutSidebarRightExpand size={18} />}
+            {liveActive && !sidebarOpen && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950 animate-pulse" />}
+          </button>
         </div>
       </header>
 

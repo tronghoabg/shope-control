@@ -90,8 +90,7 @@ export default function CommentPages({ goto }) {
   const bulkPost = () => post(queue.filter(q => sel.has(q.postId)).map(q => q.postId), (id) => setSel(p => { const n = new Set(p); n.delete(id); return n }))
 
   return (
-    <div className="flex flex-col xl:flex-row gap-6 items-start">
-      <div className="flex-1 min-w-0 space-y-6">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-900/65 pb-4">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight">Vận hành Comment Fanpage</h1>
@@ -371,14 +370,6 @@ export default function CommentPages({ goto }) {
           </Card>
         </div>
       )}
-      </div>
-
-      {/* Logs Panel (Right Side) */}
-      <div className="w-full xl:w-96 shrink-0 xl:sticky xl:top-6">
-        <ProgressPanel results={results} posting={posting} pstat={pstat} onSkipWait={skipWait} paused={paused} onPause={pause} onResume={resume}>
-          <LogFeed className="p-3 font-mono text-[11px] leading-relaxed" />
-        </ProgressPanel>
-      </div>
     </div>
   )
 }

@@ -57,6 +57,7 @@ export default function LiveSidebar({ open, onClose }) {
                   {job.paused
                     ? <button onClick={() => ext({ type: 'JOB_RESUME' })} className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/20"><IconPlayerPlay size={13} /> Tiếp tục</button>
                     : <button onClick={() => ext({ type: 'JOB_PAUSE' })} className="inline-flex items-center gap-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] font-bold text-amber-300 hover:bg-amber-500/20"><IconPlayerPause size={13} /> Tạm dừng</button>}
+                  {!job.paused && <button onClick={() => ext({ type: 'JOB_SKIP_WAIT' })} className="inline-flex items-center gap-1 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1.5 text-[11px] font-bold text-indigo-300 hover:bg-indigo-500/20"><IconChevronsRight size={13} /> Bỏ chờ</button>}
                   <button onClick={() => ext({ type: 'JOB_STOP' })} className="inline-flex items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-[11px] font-bold text-red-300 hover:bg-red-500/20"><IconPlayerStop size={13} /> Dừng</button>
                 </div>
               )}
