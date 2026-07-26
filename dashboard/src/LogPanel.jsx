@@ -1,10 +1,21 @@
 import { useEffect, useRef } from 'react'
 import { IconHistory, IconTrash, IconX, IconUsersGroup } from '@tabler/icons-react'
 import { useShope } from './ShopeContext.jsx'
+import { openFb } from './ext.js'
 
 const DOT = { success: 'bg-emerald-400', error: 'bg-red-400', info: 'bg-sky-400' }
 const TXT = { success: 'text-emerald-300', error: 'text-red-300', info: 'text-slate-300' }
 const t = (ms) => new Date(ms).toLocaleTimeString('vi')
+
+// Biến URL trong log thành link bấm được (FB → mở tab FB đang có; Shopee → tab mới).
+export function Msg({ text }) {
+  const parts = String(text || '').split(/(https?:\/\/[^\s]+)/g)
+  return <>{parts.map((p, i) => /^https?:\/\//.test(p)
+    ? (/facebook\.com/i.test(p)
+        ? <a key={i} href={p} onClick={(e) => openFb(p, e)} className="mx-0.5 font-bold text-indigo-400 hover:underline cursor-pointer">↗ xem</a>
+        : <a key={i} href={p} target="_blank" rel="noreferrer" className="mx-0.5 font-bold text-indigo-400 hover:underline">↗ link</a>)
+    : <span key={i}>{p}</span>)}</>
+}
 
 // Gom log thành block: kind 'group' mở 1 block, các 'post' kế tiếp thuộc block đó; còn lại là plain.
 function toBlocks(logs) {
@@ -39,7 +50,7 @@ export function LogFeed({ max = 150, className = '' }) {
           {b.posts.length > 0 && (
             <div className="ml-3 border-l border-slate-700 pl-2 pb-1.5">
               {b.posts.map((p, j) => (
-                <div key={j} className={`py-0.5 text-[11px] leading-snug ${TXT[p.level] || TXT.info}`}>{p.msg}</div>
+                <div key={j} className={`py-0.5 text-[11px] leading-snug ${TXT[p.level] || TXT.info}`}><Msg text={p.msg} /></div>
               ))}
             </div>
           )}
@@ -50,7 +61,7 @@ export function LogFeed({ max = 150, className = '' }) {
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT[b.log.level] || DOT.info}`} />
             <span className="font-mono text-[10px] text-slate-500">{t(b.log.t)}</span>
           </div>
-          <div className={`mt-0.5 break-words text-xs leading-snug ${TXT[b.log.level] || TXT.info}`}>{b.log.msg}</div>
+          <div className={`mt-0.5 break-words text-xs leading-snug ${TXT[b.log.level] || TXT.info}`}><Msg text={b.log.msg} /></div>
         </div>
       ))}
       <div ref={endRef} />

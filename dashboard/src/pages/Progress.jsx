@@ -5,6 +5,7 @@ import {
 } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { Card, Btn, Stat } from '../ui.jsx'
+import { Msg } from '../LogPanel.jsx'
 
 const PHASE = { scan: 'Đang quét bài & soạn comment', discover: 'Đang chấm điểm nhóm', search: 'Đang tìm & chấm điểm nhóm mới', post: 'Đang đăng bài' }
 const TONE = {
@@ -121,7 +122,7 @@ export default function Progress({ goto }) {
               <div key={i} className="flex items-start gap-3 px-5 py-2.5 hover:bg-slate-900/20">
                 {logIcon(l.level)}
                 <div className="min-w-0 flex-1">
-                  <span className={`text-xs leading-relaxed ${l.level === 'error' ? 'text-red-300' : l.level === 'success' ? 'text-slate-200' : 'text-slate-400'}`}>{l.msg}</span>
+                  <span className={`text-xs leading-relaxed ${l.level === 'error' ? 'text-red-300' : l.level === 'success' ? 'text-slate-200' : 'text-slate-400'}`}><Msg text={l.msg} /></span>
                 </div>
                 <span className="shrink-0 text-[10px] font-mono text-slate-600">{l.t ? new Date(l.t).toLocaleTimeString('vi') : ''}</span>
               </div>

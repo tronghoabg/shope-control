@@ -65,13 +65,18 @@ export default function LiveSidebar({ open, onClose }) {
               {/* Danh sách kết quả + link */}
               <div className="mt-3 max-h-[16rem] space-y-1 overflow-y-auto rounded-xl border border-slate-850 bg-slate-950/40 p-2">
                 {(job.results || []).map((r, i) => (
-                  <div key={i} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] ${r.status === 'posting' ? 'bg-indigo-500/[0.06]' : ''}`}>
-                    {statusIcon(r.status)}
-                    <span className="min-w-0 flex-1 truncate text-slate-300" title={r.name}>{r.name}</span>
-                    {r.status === 'error' && r.error && <span className="max-w-[38%] truncate text-red-400/80" title={r.error}>{r.error}</span>}
-                    {r.url && (r.status === 'success' || r.status === 'skipped') && (
-                      <a href={r.url} onClick={(e) => openFb(r.url, e)} className="shrink-0 text-indigo-400 hover:text-indigo-300 cursor-pointer" title={job.kind === 'join' ? 'Xem nhóm' : 'Xem bài'}><IconExternalLink size={13} /></a>
-                    )}
+                  <div key={i} className={`rounded-lg px-2.5 py-2 ${r.status === 'posting' ? 'bg-indigo-500/[0.06]' : r.status === 'success' ? 'bg-emerald-500/[0.04]' : ''}`}>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      {statusIcon(r.status)}
+                      <span className="min-w-0 flex-1 truncate font-semibold text-slate-200" title={r.name}>{r.name}</span>
+                      {r.url && (r.status === 'success' || r.status === 'skipped') && (
+                        <a href={r.url} onClick={(e) => openFb(r.url, e)} className="inline-flex shrink-0 items-center gap-1 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-bold text-indigo-300 hover:bg-indigo-500/20 cursor-pointer">
+                          <IconExternalLink size={11} /> {job.kind === 'join' ? 'Xem nhóm' : 'Xem bài'}
+                        </a>
+                      )}
+                    </div>
+                    {r.comment && r.status !== 'error' && <div className="mt-1 pl-5 text-[10px] leading-relaxed text-slate-500 line-clamp-2">💬 {r.comment}</div>}
+                    {r.status === 'error' && r.error && <div className="mt-1 pl-5 text-[10px] leading-relaxed text-red-400/80 line-clamp-2">{r.error}</div>}
                   </div>
                 ))}
               </div>

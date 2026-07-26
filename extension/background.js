@@ -874,6 +874,7 @@ async function refillQueue(opts = {}) {
       productName: item.productName,
       link: item.link,
       groupId,
+      groupName: gName,
       score: item.score,
       mode: cfg.mode,
       approved: false,        // chờ duyệt trong web app (nếu requireApproval)
@@ -940,8 +941,9 @@ async function commitComment(item) {
       stats = { ...stats, totalCommented: (stats.totalCommented || 0) + 1, lastRunAt: Date.now(), lastError: '' };
       ok = true;
       notify(`Đã comment (${state.doneToday}/${cfg.dailyCap})`, `${item.productName || ''} · điểm ${item.score}`);
-      const where = item.isPage ? `page ${item.pageName || item.pageId}` : `nhóm ${item.groupId || ''}`;
-      await pushLog('success', `✓ Đã comment ${where}: ${item.productName || 'comment dạo'} (điểm ${item.score})`);
+      const where = item.isPage ? `page "${item.pageName || item.pageId}"` : `nhóm "${item.groupName || item.groupId || ''}"`;
+      const cmtShort = String(item.comment || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+      await pushLog('success', `✓ Đã comment ${where}: "${cmtShort}"${item.link ? ` · link: ${item.link}` : ''}${item.permalink ? ` · bài: ${item.permalink}` : ''}`, { group: item.isPage ? item.pageId : item.groupId, kind: 'post' });
       // Lưu lịch sử kết quả để xem/kiểm chứng
       try {
         const { commentHistory = [] } = await chrome.storage.local.get('commentHistory');
@@ -1057,7 +1059,8 @@ async function postToGroup(groupId, message, link, opts = {}) {
       if (!pgt2.ids.includes(String(groupId))) pgt2.ids.push(String(groupId));
       await save({ state: { ...st2, postedGroupsToday: pgt2 } });
     } catch {}
-    await pushLog('success', `✓ Đã đăng bài vào ${gName}${photoIds.length ? ` (${photoIds.length} ảnh)` : ''}`);
+    const postShort = String(message || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+    await pushLog('success', `✓ Đã đăng vào nhóm "${gName}": "${postShort}"${photoIds.length ? ` (+${photoIds.length} ảnh)` : ''}${res.postUrl ? ` · bài: ${res.postUrl}` : ''}`, { group: groupId, kind: 'post' });
     // B) Ghi phiếu theo dõi bài chờ duyệt (verify sau bằng VERIFY_PENDING)
     try {
       const postId = (String(res.postUrl || '').match(/\/(?:permalink|posts)\/(\d{5,})/) || [])[1] || '';
@@ -1183,7 +1186,7 @@ async function runJobItem(job, id, cfg) {
     try { const t = await aiRewrite(message); if (t) message = t; } catch {}
   }
   const r = await postToGroup(id, message, p.link || '', { bgPresetId: p.bgPresetId || '', images: p.images || [], allowRepost: !!p.allowRepost });
-  return { ok: r.ok, skipped: !!r.skipped, error: r.ok || r.skipped ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), quotaBlocked: !!r.quotaBlocked, url: r.postUrl || '' };
+  return { ok: r.ok, skipped: !!r.skipped, error: r.ok || r.skipped ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), quotaBlocked: !!r.quotaBlocked, url: r.postUrl || '', content: message };
 }
 
 async function startJob(kind, items, params = {}) {
@@ -1232,7 +1235,7 @@ async function jobStep() {
 
     let cur = (await getCfg()).job;
     if (!cur || !cur.running) return;   // đã dừng trong lúc đăng
-    cur.results = cur.results.map((r, i) => i === curIdx ? { ...r, status: res.skipped ? 'skipped' : (res.ok ? 'success' : 'error'), error: res.error || '', url: res.url || r.url } : r);
+    cur.results = cur.results.map((r, i) => i === curIdx ? { ...r, status: res.skipped ? 'skipped' : (res.ok ? 'success' : 'error'), error: res.error || '', url: res.url || r.url, comment: res.content || r.comment } : r);
     if (res.quotaBlocked) { cur.running = false; cur.stoppedMsg = res.error || 'Hết hạn mức'; await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); await pushLog('error', `⛔ ${cur.stoppedMsg}`); return; }
     cur.consec = (res.ok || res.skipped) ? 0 : (cur.consec || 0) + 1;   // bỏ qua (đã đăng hôm nay) KHÔNG tính lỗi
     cur.idx = curIdx + 1;
