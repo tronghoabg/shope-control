@@ -32,9 +32,7 @@ export default function LiveSidebar({ open, onClose }) {
   const AUTO_NOTE = { approve: 'Đang chờ bạn duyệt comment', nopost: 'Đang tìm bài phù hợp…', cap: 'Đã đủ số bài hôm nay', err: 'Auto gặp lỗi', active: 'Đang quét & đăng' }
 
   return (
-    <>
-      <div className="fixed inset-0 z-[95] bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
-      <aside className="fixed right-0 top-0 bottom-0 z-[96] flex w-full max-w-[390px] flex-col border-l border-slate-800 bg-slate-950 shadow-2xl shadow-black/50 animate-fadeIn">
+    <aside className="flex w-[380px] min-h-0 shrink-0 flex-col border-l border-slate-800 bg-slate-950/60">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-850 px-4 py-3.5">
           <span className="flex items-center gap-2 text-sm font-bold text-slate-100"><IconActivity size={17} className="text-indigo-400" /> Tiến trình</span>
@@ -97,7 +95,6 @@ export default function LiveSidebar({ open, onClose }) {
             </div>
           </div>
         </div>
-      </aside>
-    </>
+    </aside>
   )
 }

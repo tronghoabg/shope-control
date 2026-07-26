@@ -332,9 +332,10 @@ export default function App() {
             </div>
           </footer>
         </div>
-      </div>
 
-      <LiveSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        {/* Cột Tiến trình — đẩy nội dung co lại (không đè lên) */}
+        <LiveSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      </div>
 
       {/* Chỉ báo Auto / chiến dịch nền đang chạy toàn cục + Dừng khẩn cấp */}
       {(() => {
