@@ -26,9 +26,11 @@ export async function POST(req: Request) {
     const q = await recordComment(user.id)
     if (p) {
       try {
+        // mode: post = đăng bài; social = comment dạo (không link); comment = rải link (có link Shopee)
+        const mode = p.mode === 'post' ? 'post' : p.mode === 'social' ? 'social' : 'comment'
         await prisma.postedComment.create({
           data: {
-            userId: user.id, mode: p.mode === 'post' ? 'post' : 'comment',
+            userId: user.id, mode,
             groupId: p.groupId ? String(p.groupId) : null, groupName: p.groupName ? String(p.groupName).slice(0, 200) : null,
             postId: p.postId ? String(p.postId) : null, content: String(p.content || '').slice(0, 2000),
             link: p.link ? String(p.link).slice(0, 1000) : null, permalink: p.permalink ? String(p.permalink).slice(0, 1000) : null,

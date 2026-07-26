@@ -949,7 +949,7 @@ async function commitComment(item) {
         const { commentHistory = [] } = await chrome.storage.local.get('commentHistory');
         commentHistory.unshift({
           postId: item.postId, groupId: item.isPage ? (item.pageId || '') : (item.groupId || ''),
-          groupName: item.isPage ? (item.pageName || '') : null,
+          groupName: item.isPage ? (item.pageName || '') : (item.groupName || null),
           productName: item.productName || null, link: item.link || null,
           comment: item.comment, permalink: item.permalink || '', score: item.score ?? null,
           mode: item.mode || cfg.mode, time: Date.now(),
@@ -959,8 +959,9 @@ async function commitComment(item) {
       } catch {}
       // Báo +1 quota lên web (nếu liên kết) + lưu lịch sử "Đã đăng" vào DB + cập nhật trạng thái
       const rep = await reportComment(cfg, {
-        mode: 'comment', groupId: item.isPage ? (item.pageId || '') : (item.groupId || ''),
-        groupName: item.isPage ? (item.pageName || '') : '', postId: item.postId || '',
+        mode: item.mode || cfg.mode || 'comment',   // social (comment dạo) | affiliate (rải link)
+        groupId: item.isPage ? (item.pageId || '') : (item.groupId || ''),
+        groupName: item.isPage ? (item.pageName || '') : (item.groupName || ''), postId: item.postId || '',
         content: item.comment || '', link: item.link || '', permalink: item.permalink || '',
       });
       if (!rep.ok && rep.quota) await pushLog('error', `⚠ ${rep.msg}`);

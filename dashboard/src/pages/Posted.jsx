@@ -62,7 +62,7 @@ function Item({ h, pendStatus }) {
   return (
     <div className="p-5 hover:bg-slate-900/10 transition-colors">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Badge color={isPost ? 'green' : h.mode === 'social' ? 'blue' : 'orange'}>{isPost ? 'Đăng bài' : h.mode === 'social' ? 'Comment dạo' : 'Comment / Rải link'}</Badge>
+        <Badge color={isPost ? 'green' : h.mode === 'social' ? 'blue' : 'orange'}>{isPost ? 'Đăng bài' : h.mode === 'social' ? 'Comment dạo' : 'Rải link'}</Badge>
         {h.productName && <Badge color="indigo" className="text-[10px] px-1.5">{h.productName}</Badge>}
         {h.score != null && <Badge color="yellow" className="text-[10px] px-1.5">Điểm tiềm năng {h.score}</Badge>}
         {isPost && pendStatus && PEND[pendStatus] && <Badge color={PEND[pendStatus].color} className="text-[10px] px-1.5">{PEND[pendStatus].l}</Badge>}
@@ -78,7 +78,9 @@ function Item({ h, pendStatus }) {
       <div className="whitespace-pre-wrap rounded-xl bg-slate-950/40 border border-slate-900 px-4 py-3 text-xs text-slate-300 leading-relaxed font-mono">{text}</div>
       
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-        <div>Nhóm đăng: <span className="font-semibold text-slate-350">{h.groupName || h.groupId || '—'}</span></div>
+        <div>Nhóm đăng: {h.groupId
+          ? <a href={`https://www.facebook.com/groups/${h.groupId}`} onClick={(e) => openFb(`https://www.facebook.com/groups/${h.groupId}`, e)} className="font-semibold text-indigo-300 hover:underline cursor-pointer">{h.groupName || h.groupId}</a>
+          : <span className="font-semibold text-slate-350">{h.groupName || '—'}</span>}</div>
         {h.link && (
           <div className="truncate max-w-xs">
             Link sản phẩm: <a href={h.link} target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">{h.link}</a>
