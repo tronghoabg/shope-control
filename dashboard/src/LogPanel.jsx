@@ -1,7 +1,29 @@
 import { useEffect, useRef } from 'react'
-import { IconHistory, IconTrash, IconX, IconUsersGroup } from '@tabler/icons-react'
+import { IconHistory, IconTrash, IconX, IconUsersGroup, IconCircleCheck, IconExternalLink } from '@tabler/icons-react'
 import { useShope } from './ShopeContext.jsx'
 import { openFb } from './ext.js'
+
+const TAG_STYLE = (tag = '') =>
+  tag === 'Đăng bài' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+  : tag.includes('Page') ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+  : tag === 'Comment dạo' ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+  : 'bg-orange-500/15 text-orange-300 border-orange-500/30'   // Rải link
+
+// Dòng log dạng THẺ (khi có dữ liệu cấu trúc): chip nhóm + nhãn loại + trích nội dung + nút xem bài.
+function RichLog({ log }) {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-2.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <IconCircleCheck size={14} className="shrink-0 text-emerald-400" />
+        <span className={`rounded border px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide ${TAG_STYLE(log.tag)}`}>{log.tag}</span>
+        {log.groupName && <span className="max-w-[55%] truncate rounded-md border border-indigo-500/25 bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-bold text-indigo-200" title={log.groupName}>{log.groupName}</span>}
+        <span className="ml-auto font-mono text-[10px] text-slate-600">{t(log.t)}</span>
+        {log.link && <a href={log.link} onClick={(e) => openFb(log.link, e)} className="inline-flex shrink-0 items-center gap-0.5 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-bold text-indigo-300 hover:bg-indigo-500/20 cursor-pointer"><IconExternalLink size={11} /> Xem bài</a>}
+      </div>
+      {log.content && <div className="mt-1.5 border-l-2 border-slate-700 bg-slate-950/40 px-2 py-1 text-[11px] italic leading-relaxed text-slate-300">“{log.content}”</div>}
+    </div>
+  )
+}
 
 const DOT = { success: 'bg-emerald-400', error: 'bg-red-400', info: 'bg-sky-400' }
 const TXT = { success: 'text-emerald-300', error: 'text-red-300', info: 'text-slate-300' }
@@ -49,12 +71,15 @@ export function LogFeed({ max = 150, className = '' }) {
           </div>
           {b.posts.length > 0 && (
             <div className="ml-3 border-l border-slate-700 pl-2 pb-1.5">
-              {b.posts.map((p, j) => (
-                <div key={j} className={`py-0.5 text-[11px] leading-snug ${TXT[p.level] || TXT.info}`}><Msg text={p.msg} /></div>
-              ))}
+              {b.posts.map((p, j) => p.tag
+                ? <div key={j} className="py-1"><RichLog log={p} /></div>
+                : <div key={j} className={`py-0.5 text-[11px] leading-snug ${TXT[p.level] || TXT.info}`}><Msg text={p.msg} /></div>
+              )}
             </div>
           )}
         </div>
+      ) : b.log.tag ? (
+        <RichLog key={i} log={b.log} />
       ) : (
         <div key={i} className="px-1">
           <div className="flex items-center gap-1.5">

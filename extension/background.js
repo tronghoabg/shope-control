@@ -74,6 +74,11 @@ async function pushLog(level, msg, opts = {}) {
     const entry = { t: Date.now(), level, msg: String(msg).slice(0, 300) };
     if (opts.group) entry.group = String(opts.group).slice(0, 80);
     if (opts.kind) entry.kind = opts.kind;
+    // Dữ liệu có cấu trúc → UI render dạng thẻ pro (chip nhóm màu, trích nội dung, nút xem bài).
+    if (opts.tag) entry.tag = String(opts.tag).slice(0, 24);
+    if (opts.groupName) entry.groupName = String(opts.groupName).slice(0, 120);
+    if (opts.content) entry.content = String(opts.content).replace(/\s+/g, ' ').trim().slice(0, 220);
+    if (opts.link) entry.link = String(opts.link).slice(0, 500);
     logs.push(entry);
     while (logs.length > 250) logs.shift();
     await chrome.storage.local.set({ logs });
@@ -953,9 +958,13 @@ async function commitComment(item) {
       stats = { ...stats, totalCommented: (stats.totalCommented || 0) + 1, lastRunAt: Date.now(), lastError: '' };
       ok = true;
       notify(`Đã comment (${state.doneToday}/${cfg.dailyCap})`, `${item.productName || ''} · điểm ${item.score}`);
-      const where = item.isPage ? `page "${item.pageName || item.pageId}"` : `nhóm "${item.groupName || item.groupId || ''}"`;
+      const gLabel = item.isPage ? (item.pageName || item.pageId) : (item.groupName || item.groupId || '');
       const cmtShort = String(item.comment || '').replace(/\s+/g, ' ').trim().slice(0, 140);
-      await pushLog('success', `✓ Đã comment ${where}: "${cmtShort}"${item.link ? ` · link: ${item.link}` : ''}${item.permalink ? ` · bài: ${item.permalink}` : ''}`, { group: item.isPage ? item.pageId : item.groupId, kind: 'post' });
+      await pushLog('success', `✓ Đã comment ${item.isPage ? 'page' : 'nhóm'} "${gLabel}": "${cmtShort}"${item.permalink ? ` · bài: ${item.permalink}` : ''}`, {
+        group: item.isPage ? item.pageId : item.groupId, kind: 'post',
+        tag: item.isPage ? 'Comment Page' : (item.mode === 'social' ? 'Comment dạo' : 'Rải link'),
+        groupName: gLabel, content: item.comment || '', link: item.permalink || item.link || '',
+      });
       // Lưu lịch sử kết quả để xem/kiểm chứng
       try {
         const { commentHistory = [] } = await chrome.storage.local.get('commentHistory');
@@ -1076,7 +1085,10 @@ async function postToGroup(groupId, message, link, opts = {}) {
       await save({ state: { ...st2, postedGroupsToday: pgt2 } });
     } catch {}
     const postShort = String(message || '').replace(/\s+/g, ' ').trim().slice(0, 140);
-    await pushLog('success', `✓ Đã đăng vào nhóm "${gName}": "${postShort}"${photoIds.length ? ` (+${photoIds.length} ảnh)` : ''}${res.postUrl ? ` · bài: ${res.postUrl}` : ''}`, { group: groupId, kind: 'post' });
+    await pushLog('success', `✓ Đã đăng vào nhóm "${gName}": "${postShort}"${photoIds.length ? ` (+${photoIds.length} ảnh)` : ''}${res.postUrl ? ` · bài: ${res.postUrl}` : ''}`, {
+      group: groupId, kind: 'post', tag: 'Đăng bài', groupName: gName,
+      content: (message || '') + (photoIds.length ? ` (+${photoIds.length} ảnh)` : ''), link: res.postUrl || '',
+    });
     // B) Ghi phiếu theo dõi bài chờ duyệt (verify sau bằng VERIFY_PENDING)
     try {
       const postId = (String(res.postUrl || '').match(/\/(?:permalink|posts)\/(\d{5,})/) || [])[1] || '';
