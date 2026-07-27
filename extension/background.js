@@ -907,6 +907,18 @@ async function getCommentPhotoId(creds, base64) {
   return id;
 }
 
+// Dịch lỗi Facebook sang tiếng Việt dễ hiểu + gợi ý xử lý (null = không nhận diện được).
+function explainFbError(raw) {
+  const s = String(raw || '').toLowerCase();
+  if (/spam|temporarily blocked|misused|abusi|too fast|rate.?limit|đang bị hạn chế/.test(s))
+    return 'Facebook nghi spam / tạm hạn chế đăng — nên TĂNG giãn cách (120–240s), giảm số bài/ngày và nghỉ một lát.';
+  if (/checkpoint|login|session|not logged|1357|access token|permission|xác nhận danh tính/.test(s))
+    return 'Phiên Facebook có thể hết hạn hoặc bị checkpoint — mở lại facebook.com đăng nhập, rồi bấm Kết nối lại.';
+  if (/field_exception|a server error|unexpected error|1675030|cannot.*comment|comment.*disabled|not allowed/.test(s))
+    return 'Facebook từ chối bình luận bài này (bài tắt/hạn chế bình luận, feedback cũ, hoặc đăng hơi nhanh). Đã bỏ qua, chạy bài kế.';
+  return null;
+}
+
 // ─── Đăng 1 comment (đã chọn) + ghi sổ. Không đụng tới hàng đợi. ──────────────
 async function commitComment(item) {
   let { cfg, state, stats, commentedPosts } = await getCfg();
@@ -969,12 +981,15 @@ async function commitComment(item) {
     } else {
       error = 'comment_failed: ' + JSON.stringify(res.errors || '');
       stats = { ...stats, lastError: error, lastRunAt: Date.now() };
-      await pushLog('error', `✗ Đăng comment lỗi: ${error}`);
+      const friendly = explainFbError(error);
+      const g0 = item.isPage ? (item.pageName || item.pageId) : (item.groupName || item.groupId || '');
+      await pushLog('error', friendly ? `✗ Bỏ qua bài nhóm "${g0}": ${friendly}` : `✗ Đăng comment lỗi: ${error}`);
     }
   } catch (e) {
     error = String(e?.message || e);
     stats = { ...stats, lastError: error, lastRunAt: Date.now() };
-    await pushLog('error', `✗ Đăng comment lỗi: ${error}`);
+    const friendly = explainFbError(error);
+    await pushLog('error', friendly ? `✗ Bỏ qua bài: ${friendly}` : `✗ Đăng comment lỗi: ${error}`);
   }
   // Đăng lỗi mà có đính ảnh → huỷ cache photoId (phòng ảnh đã bị FB "dùng 1 lần") để lần sau upload lại.
   if (!ok && item.attachmentId) invalidateCmtPhoto();
@@ -1083,7 +1098,8 @@ async function postToGroup(groupId, message, link, opts = {}) {
       await chrome.storage.local.set({ commentHistory });
     } catch {}
   } else {
-    await pushLog('error', `✗ Đăng bài "${gName}" thất bại: ${JSON.stringify(res.errors || '')}`);
+    const friendly = explainFbError(JSON.stringify(res.errors || ''));
+    await pushLog('error', friendly ? `✗ Bỏ qua đăng "${gName}": ${friendly}` : `✗ Đăng bài "${gName}" thất bại: ${JSON.stringify(res.errors || '')}`);
   }
   return res;
 }
