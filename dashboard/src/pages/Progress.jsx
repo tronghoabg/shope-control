@@ -27,7 +27,10 @@ function logIcon(level) {
 export default function Progress({ goto }) {
   const { s, call, notify } = useShope()
   const [now, setNow] = useState(Date.now())
+  const [capVal, setCapVal] = useState(30)
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, [])
+  useEffect(() => { if (s?.cfg?.dailyCap != null) setCapVal(s.cfg.dailyCap) }, [s?.cfg?.dailyCap])
+  const saveCap = () => { const n = Math.max(1, Number(capVal) || 1); setCapVal(n); call({ type: 'SET_CFG', cfg: { dailyCap: n } }, { okMsg: `Đã đặt hạn mức ${n} bài/ngày` }) }
   if (!s) return <p className="text-slate-500">Đang tải tiến trình…</p>
 
   const cfg = s.cfg || {}, state = s.state || {}, stats = s.stats || {}, job = s.job
@@ -107,6 +110,18 @@ export default function Progress({ goto }) {
         <Stat label="Nhóm mục tiêu" value={(cfg.groupIds || []).length} icon={IconTarget} color="indigo" />
         <Stat label="Tổng đã rải" value={stats.totalCommented || 0} icon={IconChecks} color="blue" />
       </div>
+
+      {/* Chỉnh nhanh hạn mức đăng/ngày */}
+      <Card className="flex flex-wrap items-center gap-3 p-4">
+        <div className="text-sm font-bold text-slate-200">Hạn mức đăng / ngày (Daily Cap)</div>
+        <input type="number" min={1} value={capVal}
+          onChange={e => setCapVal(e.target.value === '' ? '' : +e.target.value)} onBlur={saveCap}
+          onKeyDown={e => e.key === 'Enter' && saveCap()}
+          className="w-24 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm font-bold text-slate-100 outline-none focus:border-indigo-500" />
+        <span className="text-xs text-slate-400">bài/ngày</span>
+        <Btn size="sm" variant="primary" onClick={saveCap}>Lưu</Btn>
+        <span className="text-[11px] text-slate-500">Áp cho comment dạo / rải link. Giới hạn trên theo gói của bạn.</span>
+      </Card>
 
       {/* Hoạt động gần đây */}
       <Card className="p-0 overflow-hidden">
