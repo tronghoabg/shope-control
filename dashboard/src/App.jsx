@@ -343,8 +343,9 @@ export default function App() {
         const autoOn = s?.cfg?.autoEnabled && !s?.cfg?.killSwitch
         const jobOn = s?.job?.running
         if (!autoOn && !jobOn) return null
+        const kindLabel = s.job?.kind === 'postgroup' ? 'Đang đăng bài nền' : s.job?.kind === 'join' ? 'Đang tham gia nhóm nền' : 'Đang rải comment nền'
         const label = jobOn
-          ? (s.job.kind === 'postgroup' ? 'Đang đăng bài nền' : 'Đang rải comment nền') + ` — ${s.job.idx || 0}/${s.job.total || 0} bài`
+          ? kindLabel + ` — ${s.job.idx || 0}/${s.job.total || 0}`
           : `Auto đang chạy — đã đăng ${s.state?.doneToday || 0}/${s.cfg?.dailyCap || 0} hôm nay`
         const onStop = () => jobOn ? call({ type: 'JOB_STOP' }, { okMsg: 'Đã dừng chiến dịch' }) : call({ type: 'STOP_AUTO' }, { okMsg: 'Đã dừng Auto' })
         return (

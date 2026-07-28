@@ -1041,6 +1041,10 @@ async function aiRewrite(text) {
 // ─── Đăng 1 bài vào 1 nhóm (ComposerStoryCreate) ─────────────────────────────
 // opts: { link, bgPresetId, images:[dataURL] }
 async function postToGroup(groupId, message, link, opts = {}) {
+  // CHẶN AN TOÀN: không bao giờ đăng bài RỖNG (không nội dung + không ảnh) — tránh spam bài trống vào nhóm.
+  if (!String(message || '').trim() && !((opts.images && opts.images.length) || link)) {
+    return { ok: false, error: 'Nội dung rỗng — không đăng bài.' };
+  }
   const { cfg, state, discoveredGroups, searchResults } = await getCfg();
   const gName = (discoveredGroups.find(g => g.groupId === groupId)?.name)
     || (searchResults.find(g => g.groupId === groupId)?.name) || `Nhóm ${groupId}`;
@@ -1207,6 +1211,8 @@ async function runJobItem(job, id, cfg) {
     const r = await joinGroupById(id);
     return { ok: r.ok, skipped: !!r.skipped, error: r.ok || r.skipped ? '' : (r.error || 'join_failed'), url: `https://www.facebook.com/groups/${id}` };
   }
+  // CHẶN AN TOÀN: chỉ đăng bài khi ĐÚNG loại 'postgroup' (tránh lỡ đăng khi nhận loại lệnh lạ, vd 'join' ở bản cũ).
+  if (job.kind !== 'postgroup') return { ok: false, error: 'Loại chiến dịch không hợp lệ: ' + job.kind };
   // postgroup: sinh nội dung (spintax + biến thể + AI viết lại) rồi đăng
   const p = job.params || {};
   const vs = (p.variants && p.variants.length) ? p.variants : [p.content || ''];
@@ -1214,6 +1220,7 @@ async function runJobItem(job, id, cfg) {
   if (p.useAi && message.trim()) {
     try { const t = await aiRewrite(message); if (t) message = t; } catch {}
   }
+  if (!message.trim() && !(p.images && p.images.length)) return { ok: false, error: 'Nội dung rỗng — bỏ qua, không đăng.' };
   const r = await postToGroup(id, message, p.link || '', { bgPresetId: p.bgPresetId || '', images: p.images || [], allowRepost: !!p.allowRepost });
   return { ok: r.ok, skipped: !!r.skipped, error: r.ok || r.skipped ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), quotaBlocked: !!r.quotaBlocked, url: r.postUrl || '', content: message };
 }
