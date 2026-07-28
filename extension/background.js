@@ -1288,7 +1288,8 @@ async function _processOneStep(opts = {}) {
   let { cfg, state, stats, queue } = await getCfg();
 
   const tk = todayKey();
-  if (state.dateKey !== tk) state = { ...state, dateKey: tk, doneToday: 0 };
+  // Sang NGÀY MỚI → reset hạn mức + LƯU NGAY. (Nếu không lưu, các bước sau đọc lại state cũ sẽ ghi đè → kẹt "đủ cap".)
+  if (state.dateKey !== tk) { state = { ...state, dateKey: tk, doneToday: 0 }; await save({ state }); }
 
   // Ghi 1 dòng trạng thái Auto khi LÝ DO CHỜ thay đổi (tránh im lặng khó hiểu, không spam log).
   const note = async (key, msg) => {
@@ -1313,6 +1314,7 @@ async function _processOneStep(opts = {}) {
       for (let t = 0; t < maxTries; t++) { n = await refillQueue(); if (n) break; }
       // Đọc lại CẢ state (groupIdx/cursor đã đổi) — nếu chỉ đọc queue thì state cũ ghi đè groupIdx → kẹt quét 1 nhóm.
       ({ queue, state } = await getCfg());
+      if (state.dateKey !== tk) state = { ...state, dateKey: tk, doneToday: 0 };   // giữ reset ngày mới (phòng đọc lại state cũ)
       if (!n) {
         // Đã quét mấy nhóm liền vẫn chưa có → chỉ chờ NGẮN rồi quét tiếp nhóm khác (KHÔNG chờ full 90–240s).
         await note('nopost', `🔎 Auto: đã quét ${maxTries} nhóm chưa có bài phù hợp — sẽ tự quét tiếp các nhóm khác sau ~30s.`);
@@ -1762,11 +1764,15 @@ chrome.runtime.onInstalled.addListener(bootstrap);
 chrome.runtime.onStartup.addListener(bootstrap);
 
 async function startAuto() {
-  const { cfg, state } = await getCfg();
+  const { cfg, state, stats } = await getCfg();
   requireApiKey(cfg);
-  await save({ cfg: { ...cfg, autoEnabled: true, killSwitch: false }, state: { ...state, nextActionAt: 0 } });
+  const tk = todayKey();
+  // Sang ngày mới thì reset hạn mức; nextActionAt=0 để chạy ngay; xoá trạng thái "đã đủ cap" cũ.
+  const st = state.dateKey !== tk ? { ...state, dateKey: tk, doneToday: 0, nextActionAt: 0 } : { ...state, nextActionAt: 0 };
+  await save({ cfg: { ...cfg, autoEnabled: true, killSwitch: false }, state: st, stats: { ...stats, autoNote: '' } });
   chrome.alarms.create(TICK_ALARM, { periodInMinutes: 0.5 }); // ~30s/tick (vẫn lệ thuộc delay riêng)
   await pushLog('info', '▶ Bật chế độ Auto');
+  processOneStep().catch(e => console.warn('startAuto step', e));   // CHẠY NGAY, không chờ tick đầu
 }
 async function stopAuto(kill) {
   const { cfg } = await getCfg();
