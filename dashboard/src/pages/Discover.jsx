@@ -184,7 +184,7 @@ export default function Discover() {
                 <span className="font-mono">{bulk.done} / {bulk.total}</span>
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-950 border border-slate-900">
-                <div className="h-full bg-gradient-to-r from-emerald-600 to-teal-500 transition-all duration-300" style={{ width: `${(bulk.done / bulk.total) * 100}%` }} />
+                <div className="h-full bg-gradient-to-r from-emerald-600 to-teal-500 transition-all duration-300" style={{ width: `${bulk.total ? (bulk.done / bulk.total) * 100 : 0}%` }} />
               </div>
             </div>
           )}

@@ -930,6 +930,11 @@ async function commitComment(item) {
   const tk = todayKey();
   if (state.dateKey !== tk) state = { ...state, dateKey: tk, doneToday: 0 };
 
+  // CHẶN AN TOÀN: không đăng comment RỖNG (trừ khi có ảnh đính kèm).
+  if (!String(item.comment || '').trim() && !item.attachmentId && !(item.mode === 'social' && cfg.commentImageBase64)) {
+    return { ok: false, error: 'Nội dung comment rỗng — bỏ qua.' };
+  }
+
   // Kiểm tra hạn mức tài khoản (free 10/ngày) TRƯỚC khi đăng — nếu đã liên kết web
   const qc = await checkQuota(cfg);
   if (!qc.ok) {
@@ -1194,7 +1199,7 @@ async function commitQueueItem(postId) {
   return serializeCommit(async () => {
     const { queue } = await getCfg();
     const item = queue.find(it => it.postId === postId);
-    if (!item) return { ok: false, error: 'không thấy item trong hàng chờ' };
+    if (!item) return { ok: false, skipped: true, error: 'Bài đã được xử lý/đăng trước đó — bỏ qua.' };
     await save({ queue: queue.filter(it => it.postId !== postId) });
     const res = await commitComment(item);
     if (!res.ok) { const { queue: q2 } = await getCfg(); if (!q2.some(it => it.postId === item.postId)) await save({ queue: [item, ...q2] }); }
@@ -1205,7 +1210,7 @@ async function commitQueueItem(postId) {
 async function runJobItem(job, id, cfg) {
   if (job.kind === 'comment') {
     const r = await commitQueueItem(id);
-    return { ok: r.ok, error: r.error || '', quotaBlocked: !!r.quotaBlocked, url: r.url || '' };
+    return { ok: r.ok, skipped: !!r.skipped, error: r.error || '', quotaBlocked: !!r.quotaBlocked, url: r.url || '' };
   }
   if (job.kind === 'join') {
     const r = await joinGroupById(id);
@@ -1230,6 +1235,8 @@ async function startJob(kind, items, params = {}) {
   if (!list.length) throw new Error('Không có mục nào để chạy');
   const st = await getCfg();
   if (st.job && st.job.running) throw new Error('Đang có chiến dịch chạy nền — hãy DỪNG nó trước khi chạy cái mới.');
+  // Chặn chạy song song với Auto: 2 luồng cùng thao tác 1 tab Facebook → dễ đăng trùng / checkpoint.
+  if (st.cfg.autoEnabled && !st.cfg.killSwitch) throw new Error('Đang bật Auto — hãy TẮT Auto trước khi chạy chiến dịch nền (tránh trùng thao tác Facebook).');
   if (kind !== 'join') requireApiKey(st.cfg);   // join chỉ cần Facebook, không cần AI
   const floor = kind === 'join' ? 20 : MIN_DELAY_SEC;   // join giãn cách tối thiểu 20s; comment/post 90s
   const delayMin = Math.max(floor, params.delayMin || st.cfg.minDelaySec || floor);
@@ -1771,8 +1778,9 @@ chrome.runtime.onInstalled.addListener(bootstrap);
 chrome.runtime.onStartup.addListener(bootstrap);
 
 async function startAuto() {
-  const { cfg, state, stats } = await getCfg();
+  const { cfg, state, stats, job } = await getCfg();
   requireApiKey(cfg);
+  if (job && job.running) throw new Error('Đang có chiến dịch nền chạy — hãy DỪNG nó trước khi bật Auto.');
   const tk = todayKey();
   // Sang ngày mới thì reset hạn mức; nextActionAt=0 để chạy ngay; xoá trạng thái "đã đủ cap" cũ.
   const st = state.dateKey !== tk ? { ...state, dateKey: tk, doneToday: 0, nextActionAt: 0 } : { ...state, nextActionAt: 0 };

@@ -135,7 +135,7 @@ export default function CommentGroups() {
   const allQSel = queue.length > 0 && queue.every(q => sel.has(q.postId))
   const toggleAllQ = () => setSel(allQSel ? new Set() : new Set(queue.map(q => q.postId)))
   const selCount = queue.filter(q => sel.has(q.postId)).length
-  const bulkPost = () => post(queue.filter(q => sel.has(q.postId)).map(q => q.postId), (id) => setSel(p => { const n = new Set(p); n.delete(id); return n }))
+  const bulkPost = async () => { const ids = queue.filter(q => sel.has(q.postId)).map(q => q.postId); await post(ids); setSel(new Set()) }
 
   return (
     <div className="space-y-6">

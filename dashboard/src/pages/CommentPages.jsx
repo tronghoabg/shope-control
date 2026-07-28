@@ -32,6 +32,10 @@ export default function CommentPages({ goto }) {
     return [...m.values()]
   }, [s?.pageSearchResults, s?.targetPages, s?.savedPageLists])
 
+  // Chưa chọn Page mục tiêu mà đang ở bước "Lấy bài & rải" → đưa về bước chọn Page (hook PHẢI trước early return).
+  const nPagesForEffect = (s?.targetPages || []).length
+  useEffect(() => { if (nPagesForEffect === 0 && step === 2) setStep(1) }, [nPagesForEffect, step])
+
   if (!s) return <p className="text-slate-500">Đang tải cấu hình Fanpage…</p>
 
   const cfg = s.cfg || {}
@@ -41,9 +45,6 @@ export default function CommentPages({ goto }) {
   const nPages = targetPages.length
   const savedPageLists = s.savedPageLists || []
   const act = (type, postId, extra, timeout) => call({ type, postId, ...(extra || {}) }, { timeout })
-
-  // Chưa chọn Page mục tiêu mà đang ở bước "Lấy bài & rải" → đưa về bước chọn Page cho người mới.
-  useEffect(() => { if (nPages === 0 && step === 2) setStep(1) }, [nPages, step])
 
   const setTargets = (pages) => call({ type: 'SET_TARGET_PAGES', pages })
   const toggleTarget = (p) => setTargets(targetIds.has(p.pageId) ? targetPages.filter(x => x.pageId !== p.pageId) : [...targetPages, p])
@@ -87,7 +88,7 @@ export default function CommentPages({ goto }) {
   const allQSel = queue.length > 0 && queue.every(q => sel.has(q.postId))
   const toggleAllQ = () => setSel(allQSel ? new Set() : new Set(queue.map(q => q.postId)))
   const selCount = queue.filter(q => sel.has(q.postId)).length
-  const bulkPost = () => post(queue.filter(q => sel.has(q.postId)).map(q => q.postId), (id) => setSel(p => { const n = new Set(p); n.delete(id); return n }))
+  const bulkPost = async () => { const ids = queue.filter(q => sel.has(q.postId)).map(q => q.postId); await post(ids); setSel(new Set()) }
 
   return (
     <div className="space-y-6">
