@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, useEffect } from 'react'
 import { 
   IconSend, IconPlayerPlay, IconPlayerStop, IconTarget, IconExternalLink, IconCheck, IconX, 
   IconWand, IconRefresh, IconPhoto, IconPalette, IconSparkles, IconTrash, IconBookmark,
-  IconClock, IconMessageCircle, IconShare3, IconThumbUp, IconUserCircle
+  IconClock, IconMessageCircle, IconShare3, IconThumbUp, IconUserCircle, IconVideo
 } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
@@ -39,6 +39,7 @@ export default function PostGroups() {
   const [content, setContent] = useState('')
   const [link, setLink] = useState('')
   const [images, setImages] = useState([])   // [{ name, url(dataURL) }]
+  const [video, setVideo] = useState(null)   // { name, url(dataURL) } | null
   const [bg, setBg] = useState('')            // text_format_preset_id ('' = không nền)
   const [useAi, setUseAi] = useState(false)
   const [editingId, setEditingId] = useState('')   // id bài mẫu đang mở ('' = bài mới)
@@ -49,6 +50,7 @@ export default function PostGroups() {
   const [dMin, setDMin] = useState(Math.max(MIN_DELAY, s?.cfg?.minDelaySec ?? 120))
   const [dMax, setDMax] = useState(Math.max(MIN_DELAY, s?.cfg?.maxDelaySec ?? 240))
   const fileRef = useRef(null)
+  const videoRef = useRef(null)
 
   // Chiến dịch đăng bài CHẠY NỀN (service worker) — tiến trình đọc từ state.job.
   const job = (s?.job && s.job.kind === 'postgroup') ? s.job : null
@@ -82,7 +84,7 @@ export default function PostGroups() {
   const [pvSeed, setPvSeed] = useState(0)
   // Ổn định preview (chỉ đổi khi sửa nội dung hoặc bấm "Đổi biến thể") + xoay vòng các biến thể.
   const preview = useMemo(() => spin(variants[pvSeed % Math.max(1, variants.length)] || content), [content, pvSeed]) // eslint-disable-line react-hooks/exhaustive-deps
-  const bgDisabled = images.length > 0 || !!link.trim()
+  const bgDisabled = images.length > 0 || !!video || !!link.trim()
   const activeBg = !bgDisabled ? BG_PRESETS.find(b => b.id === bg) : null
   const shownPool = gFilter.trim() ? pool.filter(g => (g.name || '').toLowerCase().includes(gFilter.trim().toLowerCase())) : pool
   const allShownSelected = shownPool.length > 0 && shownPool.every(g => sel.has(g.id))
@@ -93,19 +95,40 @@ export default function PostGroups() {
     files.forEach(f => {
       if (!f.type.startsWith('image/')) return
       const reader = new FileReader()
-      reader.onload = () => setImages(prev => prev.length >= 8 ? prev : [...prev, { name: f.name, url: reader.result }])
+      reader.onload = () => { setImages(prev => prev.length >= 8 ? prev : [...prev, { name: f.name, url: reader.result }]); setVideo(null) }
       reader.readAsDataURL(f)
     })
     if (fileRef.current) fileRef.current.value = ''
   }
   const removeImg = (i) => setImages(prev => prev.filter((_, n) => n !== i))
+  const onVideo = (e) => {
+    const f = (e.target.files || [])[0]
+    if (f) {
+      if (!f.type.startsWith('video/')) { notify('red', 'File không phải video'); }
+      else if (f.size > 100 * 1024 * 1024) { notify('red', 'Video quá lớn (giới hạn 100MB)'); }
+      else {
+        const reader = new FileReader()
+        reader.onload = async () => {
+          const oldKey = video?.key
+          // Lưu bytes ở key riêng trong extension (không nhồi vào state/job → đỡ nặng).
+          const r = await ext({ type: 'PUT_MEDIA', dataUrl: reader.result, name: f.name })
+          if (oldKey) ext({ type: 'DEL_MEDIA', id: oldKey })
+          setVideo({ name: f.name, url: reader.result, key: r?.id || '' })
+          setImages([])   // video & ảnh không đi cùng
+        }
+        reader.readAsDataURL(f)
+      }
+    }
+    if (videoRef.current) videoRef.current.value = ''
+  }
+  const removeVideo = () => { if (video?.key) ext({ type: 'DEL_MEDIA', id: video.key }); setVideo(null) }
 
   const savedPosts = s.savedPosts || []
   const editingPost = savedPosts.find(x => x.id === editingId)
   // Lưu: nếu đang mở 1 bài mẫu → CẬP NHẬT tại chỗ (gửi kèm id); nếu không → tạo mới.
   const savePost = async () => {
     if (!content.trim()) return notify('red', 'Chưa có nội dung để lưu')
-    const r = await ext({ type: 'SAVE_POST', post: { id: editingId || undefined, content, link: link.trim(), bgPresetId: bgDisabled ? '' : bg, images: images.map(im => im.url) } })
+    const r = await ext({ type: 'SAVE_POST', post: { id: editingId || undefined, content, link: link.trim(), bgPresetId: bgDisabled ? '' : bg, images: images.map(im => im.url), videoKey: video?.key || '' } })
     refresh()
     if (r?.post?.id) setEditingId(r.post.id)
     notify('green', editingId ? 'Đã cập nhật bài mẫu' : 'Đã lưu bài mẫu mới')
@@ -114,6 +137,13 @@ export default function PostGroups() {
     const p = savedPosts.find(x => x.id === id); if (!p) return
     setContent(p.content || ''); setLink(p.link || ''); setBg(p.bgPresetId || ''); setEditingId(p.id)
     setImages((p.images || []).map((url, i) => ({ name: `Ảnh ${i + 1}`, url })))
+    // Video lưu ở key riêng → nạp lại để xem trước (chỉ khi bài có videoKey).
+    if (p.videoKey) {
+      ext({ type: 'GET_MEDIA', id: p.videoKey }).then(r => {
+        if (r?.ok && r.dataUrl) setVideo({ name: r.name || 'Video', url: r.dataUrl, key: p.videoKey })
+        else setVideo(null)
+      })
+    } else setVideo(null)
     notify('blue', `Đã mở bài mẫu "${p.title}" để chỉnh sửa`)
   }
   const newPost = () => { setEditingId(''); setContent(''); setLink(''); setBg(''); setImages([]); notify('blue', 'Đã tạo bài mới') }
@@ -127,7 +157,7 @@ export default function PostGroups() {
   async function run() {
     let ids = [...sel]
     if (!ids.length) return notify('red', 'Chưa chọn nhóm nào')
-    if (!content.trim() && !images.length) return notify('red', 'Chưa có nội dung hoặc ảnh')
+    if (!content.trim() && !images.length && !video) return notify('red', 'Chưa có nội dung / ảnh / video')
     // Xác nhận trước hành động không hoàn tác được (đăng bài thật lên nhiều nhóm) + ước tính thời gian.
     const loS = Math.max(MIN_DELAY, Math.min(dMin, dMax)), hiS = Math.max(loS, Math.max(dMin, dMax))
     const avg = (loS + hiS) / 2
@@ -137,7 +167,7 @@ export default function PostGroups() {
     // Vòng lặp + giãn cách do service worker lo → chạy tiếp cả khi tab ẩn/đóng.
     const r = await ext({
       type: 'START_JOB', kind: 'postgroup', items: ids,
-      params: { content, variants: hasVar ? variants : [content], link: link.trim(), images: images.map(im => im.url), bgPresetId: bgDisabled ? '' : bg, useAi: useAi && aiReady, delayMin: dMin, delayMax: dMax, stopOnError },
+      params: { content, variants: hasVar ? variants : [content], link: link.trim(), images: images.map(im => im.url), videoKey: video?.key || '', bgPresetId: bgDisabled ? '' : bg, useAi: useAi && aiReady, delayMin: dMin, delayMax: dMax, stopOnError },
     })
     if (!r?.ok) notify('red', r?.error || 'Không khởi chạy được chiến dịch')
     else { notify('green', `Đã bắt đầu đăng ${ids.length} nhóm — chạy nền, có thể đóng tab.`); refresh() }
@@ -163,7 +193,7 @@ export default function PostGroups() {
             : <Btn variant="primary" icon={IconPlayerPlay} onClick={() => {
                 if (!account?.loggedIn) return notify('red', 'Vui lòng đăng nhập tài khoản hệ thống để sử dụng tính năng này')
                 run()
-              }} disabled={!sel.size || (!content.trim() && !images.length)}>Khởi chạy ({sel.size} nhóm)</Btn>}
+              }} disabled={!sel.size || (!content.trim() && !images.length && !video)}>Khởi chạy ({sel.size} nhóm)</Btn>}
         </div>
       </div>
 
@@ -213,6 +243,25 @@ export default function PostGroups() {
                       </button>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+            {/* Video đính kèm (video & ảnh không đi cùng nhau) */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Video đính kèm {video ? '(1)' : ''}</span>
+                <Btn size="sm" variant="ghost" icon={IconVideo} onClick={() => videoRef.current?.click()} disabled={!!video || images.length > 0}>{video ? 'Đổi video' : 'Thêm video'}</Btn>
+                <input ref={videoRef} type="file" accept="video/*" hidden onChange={onVideo} />
+              </div>
+              {images.length > 0 && !video && <p className="text-[11px] text-slate-500">Đang có ảnh — gỡ ảnh nếu muốn đính video (không dùng chung).</p>}
+              {video && (
+                <div className="group relative overflow-hidden rounded-xl border border-slate-800 bg-black">
+                  <video src={video.url} controls className="max-h-56 w-full object-contain bg-black" />
+                  <div className="flex items-center justify-between px-3 py-2 bg-slate-900/70">
+                    <span className="text-xs text-slate-400 truncate">{video.name}</span>
+                    <button onClick={removeVideo} className="text-slate-400 hover:text-red-400 transition-colors"><IconTrash size={16} /></button>
+                  </div>
                 </div>
               )}
             </div>
@@ -322,6 +371,11 @@ export default function PostGroups() {
                           )}
                         </div>
                       ))}
+                    </div>
+                  )}
+                  {video && (
+                    <div className="overflow-hidden rounded-xl border border-slate-850 bg-black">
+                      <video src={video.url} controls className="max-h-72 w-full object-contain bg-black" />
                     </div>
                   )}
                 </div>

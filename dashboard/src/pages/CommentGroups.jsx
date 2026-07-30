@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import {
   IconUsersGroup, IconRadar, IconPlayerStop, IconBookmark, IconTarget, IconExternalLink,
   IconSend, IconHistory, IconDeviceFloppy, IconPlayerPlay, IconHandStop, IconTrash, IconSparkles,
-  IconSettings, IconChevronRight, IconListNumbers, IconPhoto, IconX
+  IconSettings, IconChevronRight, IconListNumbers, IconPhoto, IconVideo, IconX
 } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext } from '../ext.js'
@@ -27,6 +27,7 @@ export default function CommentGroups() {
   const [listName, setListName] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [step, setStep] = useState(2) // default to Step 3 (index 2) so they see queue immediately
+  const [videoPreview, setVideoPreview] = useState(null)   // dataURL để xem trước video đính kèm comment
 
   const pool = useMemo(() => {
     const m = new Map()
@@ -37,6 +38,17 @@ export default function CommentGroups() {
   }, [s?.discoveredGroups, s?.searchResults, s?.cfg?.groupIds])
 
   useEffect(() => { if (s?.cfg && !cfgL) setLocal(s.cfg) }, [s, cfgL])
+
+  // Nạp video xem trước từ key riêng (video KHÔNG lưu trong cfg → phải GET_MEDIA).
+  const cvKey = s?.cfg?.commentVideoKey || ''
+  useEffect(() => {
+    if (!cvKey) { setVideoPreview(null); return }
+    if (videoPreview?.key === cvKey) return
+    call({ type: 'GET_MEDIA', id: cvKey }).then(r => {
+      if (r?.ok && r.dataUrl) setVideoPreview({ key: cvKey, url: r.dataUrl })
+      else setVideoPreview(null)
+    })
+  }, [cvKey])
   
   // If targets are empty, fallback to Step 2
   const targets = s?.cfg?.groupIds || []
@@ -97,6 +109,32 @@ export default function CommentGroups() {
   const removeImage = () => {
     setLocal({ ...cfgL, commentImageBase64: null })
     setCfg({ commentImageBase64: null })
+  }
+
+  const handleVideoUpload = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    if (!file.type.startsWith('video/')) return notify('red', 'Vui lòng chọn file video hợp lệ')
+    if (file.size > 100 * 1024 * 1024) return notify('red', 'Video quá lớn (giới hạn 100MB)')
+    const reader = new FileReader()
+    reader.onload = async (ev) => {
+      const oldKey = cfgL?.commentVideoKey
+      // Bytes lưu ở key riêng (không nhồi vào cfg → GET_STATE khỏi nặng). cfg chỉ giữ tham chiếu.
+      const r = await call({ type: 'PUT_MEDIA', dataUrl: ev.target.result, name: file.name })
+      if (oldKey) call({ type: 'DEL_MEDIA', id: oldKey })
+      const id = r?.id || ''
+      setVideoPreview({ key: id, url: ev.target.result })
+      // Video & ảnh không đính cùng — chọn video thì bỏ ảnh.
+      setLocal({ ...cfgL, commentVideoKey: id, commentImageBase64: null })
+      setCfg({ commentVideoKey: id, commentImageBase64: null })
+    }
+    reader.readAsDataURL(file)
+  }
+  const removeVideo = () => {
+    if (cfgL?.commentVideoKey) call({ type: 'DEL_MEDIA', id: cfgL.commentVideoKey })
+    setVideoPreview(null)
+    setLocal({ ...cfgL, commentVideoKey: null })
+    setCfg({ commentVideoKey: null })
   }
 
   // ── Nhóm mục tiêu ──
@@ -247,6 +285,24 @@ export default function CommentGroups() {
                     <label className="flex w-fit cursor-pointer items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-300 hover:border-indigo-500 hover:text-indigo-400 transition-colors">
                       <IconPhoto size={16} /> Chọn ảnh đính kèm
                       <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                    </label>
+                  )}
+                </div>
+                <div className="mt-4 border-t border-slate-800 pt-3">
+                  <div className="mb-2 text-sm font-medium text-slate-200 flex items-center justify-between">
+                    <span>Video đính kèm <span className="text-xs font-normal text-slate-500">(đính video này vào mọi comment dạo — không dùng chung với ảnh)</span></span>
+                  </div>
+                  {videoPreview?.url ? (
+                    <div className="relative inline-block group">
+                      <video src={videoPreview.url} controls className="h-32 w-auto rounded-lg border border-slate-700 bg-black object-contain" />
+                      <button onClick={removeVideo} title="Xóa video" className="absolute -top-2 -right-2 rounded-full bg-red-500 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100 shadow-lg">
+                        <IconX size={14} stroke={3} />
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex w-fit cursor-pointer items-center gap-2 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-300 hover:border-indigo-500 hover:text-indigo-400 transition-colors">
+                      <IconVideo size={16} /> Chọn video đính kèm
+                      <input type="file" accept="video/*" className="hidden" onChange={handleVideoUpload} />
                     </label>
                   )}
                 </div>

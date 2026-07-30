@@ -930,8 +930,9 @@ async function commitComment(item) {
   const tk = todayKey();
   if (state.dateKey !== tk) state = { ...state, dateKey: tk, doneToday: 0 };
 
-  // CHẶN AN TOÀN: không đăng comment RỖNG (trừ khi có ảnh đính kèm).
-  if (!String(item.comment || '').trim() && !item.attachmentId && !(item.mode === 'social' && cfg.commentImageBase64)) {
+  // CHẶN AN TOÀN: không đăng comment RỖNG (trừ khi có ảnh/video đính kèm).
+  if (!String(item.comment || '').trim() && !item.attachmentId && !item.videoId
+      && !(item.mode === 'social' && (cfg.commentImageBase64 || cfg.commentVideoKey))) {
     return { ok: false, error: 'Nội dung comment rỗng — bỏ qua.' };
   }
 
@@ -946,9 +947,15 @@ async function commitComment(item) {
   const creds = await getCreds();
   let ok = false, error = '';
   try {
-    // Ảnh đính kèm CHỈ cho comment dạo (mode 'social') — KHÔNG đính vào comment rải link (Shopee/Catalog).
-    // Tối ưu: upload 1 lần rồi tái dùng photoId (cache theo ảnh) → không upload lại mỗi comment.
-    if (item.mode === 'social' && cfg.commentImageBase64) {
+    // Ảnh/video đính kèm CHỈ cho comment dạo (mode 'social') — KHÔNG đính vào comment rải link (Shopee/Catalog).
+    // Tối ưu: upload 1 lần rồi tái dùng id (cache) → không upload lại mỗi comment. Video ưu tiên hơn ảnh.
+    if (item.mode === 'social' && cfg.commentVideoKey) {
+      try {
+        item.videoId = await getUploadedVideoIdByKey(creds, cfg.commentVideoKey, 'đính kèm comment');
+      } catch (err) {
+        await pushLog('error', `Tải video đính kèm thất bại, sẽ bỏ qua video: ${err.message}`);
+      }
+    } else if (item.mode === 'social' && cfg.commentImageBase64) {
       try {
         item.attachmentId = await getCommentPhotoId(creds, cfg.commentImageBase64);
       } catch (err) {
@@ -1005,8 +1012,9 @@ async function commitComment(item) {
     const friendly = explainFbError(error);
     await pushLog('error', friendly ? `✗ Bỏ qua bài: ${friendly}` : `✗ Đăng comment lỗi: ${error}`);
   }
-  // Đăng lỗi mà có đính ảnh → huỷ cache photoId (phòng ảnh đã bị FB "dùng 1 lần") để lần sau upload lại.
+  // Đăng lỗi mà có đính ảnh/video → huỷ cache (phòng media đã bị FB "dùng 1 lần") để lần sau upload lại.
   if (!ok && item.attachmentId) invalidateCmtPhoto();
+  if (!ok && item.videoId) invalidateCmtVideo();
   const delay = rndDelaySec(cfg);
   await save({ commentedPosts, state: { ...state, nextActionAt: Date.now() + delay * 1000 }, stats });
   return { ok, error, doneToday: state.doneToday, nextInSec: delay };
@@ -1037,6 +1045,59 @@ async function runUploadInFbTab(url, fields, file) {
   throw new Error(r?.error || 'upload_failed');
 }
 
+// ─── Upload RAW (body = bytes) TRONG tab FB: cho bước rupload video ───────────
+// headers: {offset, x-entity-*, id, composer_session_id, ...}  ·  fileInfo: {base64, mime}
+async function runRawUploadInFbTab(url, headers, fileInfo) {
+  const tabId = await getFbTab();
+  const inj = await chrome.scripting.executeScript({
+    target: { tabId }, world: 'ISOLATED',
+    args: [url, headers || {}, fileInfo],
+    func: async (u, h, f) => {
+      try {
+        const bin = atob(f.base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const blob = new Blob([bytes], { type: f.mime || 'video/mp4' });
+        const r = await fetch(u, { method: 'POST', credentials: 'include', headers: h, body: blob });
+        return { ok: true, data: await r.text() };
+      } catch (err) { return { ok: false, error: String(err?.message || err) }; }
+    },
+  });
+  const r = inj?.[0]?.result;
+  if (r?.ok) return r.data;
+  throw new Error(r?.error || 'video_upload_failed');
+}
+
+// ─── Media lớn (VIDEO) lưu ở KEY RIÊNG "vmedia_<id>" — KHÔNG nằm trong cfg/savedPosts/job ──
+// Lý do: GET_STATE gửi cả cfg/savedPosts/job cho dashboard mỗi 4s; nhét video base64 vào đó
+// sẽ đẩy vài MB mỗi 4s (lag). Nên chỉ lưu tham chiếu (videoKey), bytes để riêng, đọc khi cần.
+function mediaKey(id) { return 'vmedia_' + String(id); }
+async function putMedia(id, dataUrl, name) {
+  const mid = id || ('v_' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36));
+  await chrome.storage.local.set({ [mediaKey(mid)]: { dataUrl, name: name || 'video.mp4', at: Date.now() } });
+  return mid;
+}
+async function getMedia(id) {
+  if (!id) return null;
+  const o = (await chrome.storage.local.get(mediaKey(id)))[mediaKey(id)];
+  return o || null;
+}
+async function delMedia(id) { if (id) { try { await chrome.storage.local.remove(mediaKey(id)); } catch {} } }
+
+// Cache video đã upload: theo videoKey → khỏi upload lại mỗi comment. TTL 20'.
+let _cmtVideo = { key: '', id: '', at: 0 };
+function invalidateCmtVideo() { _cmtVideo = { key: '', id: '', at: 0 }; }
+// videoKey → videoId (upload nếu chưa có). Bytes lấy từ storage key riêng.
+async function getUploadedVideoIdByKey(creds, videoKey, label) {
+  if (_cmtVideo.id && _cmtVideo.key === videoKey && Date.now() - _cmtVideo.at < 20 * 60 * 1000) return _cmtVideo.id;
+  const media = await getMedia(videoKey);
+  if (!media?.dataUrl) throw new Error('Không tìm thấy dữ liệu video (đã xoá?)');
+  await pushLog('info', `Đang tải video ${label || ''} lên Facebook… (có thể mất chút thời gian)`);
+  const id = await self.ShopeFbApi.fbUploadVideo(runFetchInFbTab, runRawUploadInFbTab, creds, media.dataUrl, media.name || 'video.mp4');
+  _cmtVideo = { key: videoKey, id, at: Date.now() };
+  return id;
+}
+
 // ─── AI viết lại nội dung — prompt nằm ở server (task 'rewrite') ──────────────
 async function aiRewrite(text) {
   const { cfg } = await getCfg();
@@ -1044,10 +1105,10 @@ async function aiRewrite(text) {
 }
 
 // ─── Đăng 1 bài vào 1 nhóm (ComposerStoryCreate) ─────────────────────────────
-// opts: { link, bgPresetId, images:[dataURL] }
+// opts: { link, bgPresetId, images:[dataURL], videoKey }
 async function postToGroup(groupId, message, link, opts = {}) {
-  // CHẶN AN TOÀN: không bao giờ đăng bài RỖNG (không nội dung + không ảnh) — tránh spam bài trống vào nhóm.
-  if (!String(message || '').trim() && !((opts.images && opts.images.length) || link)) {
+  // CHẶN AN TOÀN: không bao giờ đăng bài RỖNG (không nội dung + không ảnh/video) — tránh spam bài trống vào nhóm.
+  if (!String(message || '').trim() && !((opts.images && opts.images.length) || opts.videoKey || link)) {
     return { ok: false, error: 'Nội dung rỗng — không đăng bài.' };
   }
   const { cfg, state, discoveredGroups, searchResults } = await getCfg();
@@ -1078,11 +1139,22 @@ async function postToGroup(groupId, message, link, opts = {}) {
     try { photoIds.push(await self.ShopeFbApi.fbUploadPhoto(runUploadInFbTab, creds, images[i], `photo_${i + 1}.jpg`)); }
     catch (e) { await pushLog('warn', `⚠ Ảnh ${i + 1} "${gName}" lỗi upload: ${e?.message || e}`); }
   }
-  // Nền màu chỉ áp cho bài CHỮ thuần (FB bỏ nền nếu có ảnh/link)
-  const bgPresetId = (!photoIds.length && !link) ? (opts.bgPresetId || '') : '';
+  // Upload video (nếu có) → videoId. Video ưu tiên hơn ảnh (FB 1 bài không trộn ảnh+video kiểu này).
+  // Bytes lấy từ storage key riêng (videoKey) — không truyền base64 qua job/state.
+  let videoId = '';
+  if (opts.videoKey) {
+    try {
+      const media = await getMedia(opts.videoKey);
+      if (!media?.dataUrl) throw new Error('không tìm thấy dữ liệu video (đã xoá?)');
+      videoId = await self.ShopeFbApi.fbUploadVideo(runFetchInFbTab, runRawUploadInFbTab, creds, media.dataUrl, media.name || 'video.mp4');
+    }
+    catch (e) { await pushLog('error', `✗ Video "${gName}" lỗi upload: ${e?.message || e}`); return { ok: false, error: 'Upload video lỗi: ' + String(e?.message || e) }; }
+  }
+  // Nền màu chỉ áp cho bài CHỮ thuần (FB bỏ nền nếu có ảnh/video/link)
+  const bgPresetId = (!photoIds.length && !videoId && !link) ? (opts.bgPresetId || '') : '';
 
   let res;
-  try { res = await self.ShopeFbApi.fbCreateGroupPost(runFetchInFbTab, creds, groupId, message, { link, photoIds, bgPresetId }); }
+  try { res = await self.ShopeFbApi.fbCreateGroupPost(runFetchInFbTab, creds, groupId, message, { link, photoIds, videoId, bgPresetId }); }
   catch (e) { await pushLog('error', `✗ Đăng bài "${gName}" lỗi: ${e?.message || e}`); return { ok: false, error: String(e?.message || e) }; }
 
   if (res.ok) {
@@ -1094,9 +1166,10 @@ async function postToGroup(groupId, message, link, opts = {}) {
       await save({ state: { ...st2, postedGroupsToday: pgt2 } });
     } catch {}
     const postShort = String(message || '').replace(/\s+/g, ' ').trim().slice(0, 140);
-    await pushLog('success', `✓ Đã đăng vào nhóm "${gName}": "${postShort}"${photoIds.length ? ` (+${photoIds.length} ảnh)` : ''}${res.postUrl ? ` · bài: ${res.postUrl}` : ''}`, {
+    const mediaTag = videoId ? ' (+video)' : (photoIds.length ? ` (+${photoIds.length} ảnh)` : '');
+    await pushLog('success', `✓ Đã đăng vào nhóm "${gName}": "${postShort}"${mediaTag}${res.postUrl ? ` · bài: ${res.postUrl}` : ''}`, {
       group: groupId, kind: 'post', tag: 'Đăng bài', groupName: gName,
-      content: (message || '') + (photoIds.length ? ` (+${photoIds.length} ảnh)` : ''), link: res.postUrl || '',
+      content: (message || '') + mediaTag, link: res.postUrl || '',
     });
     // B) Ghi phiếu theo dõi bài chờ duyệt (verify sau bằng VERIFY_PENDING)
     try {
@@ -1225,8 +1298,8 @@ async function runJobItem(job, id, cfg) {
   if (p.useAi && message.trim()) {
     try { const t = await aiRewrite(message); if (t) message = t; } catch {}
   }
-  if (!message.trim() && !(p.images && p.images.length)) return { ok: false, error: 'Nội dung rỗng — bỏ qua, không đăng.' };
-  const r = await postToGroup(id, message, p.link || '', { bgPresetId: p.bgPresetId || '', images: p.images || [], allowRepost: !!p.allowRepost });
+  if (!message.trim() && !(p.images && p.images.length) && !p.videoKey) return { ok: false, error: 'Nội dung rỗng — bỏ qua, không đăng.' };
+  const r = await postToGroup(id, message, p.link || '', { bgPresetId: p.bgPresetId || '', images: p.images || [], videoKey: p.videoKey || '', allowRepost: !!p.allowRepost });
   return { ok: r.ok, skipped: !!r.skipped, error: r.ok || r.skipped ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), quotaBlocked: !!r.quotaBlocked, url: r.postUrl || '', content: message };
 }
 
@@ -1828,6 +1901,18 @@ async function handle(request, sendResponse) {
         sendResponse({ ok: true });
         break;
       }
+      // Lưu/đọc/xoá VIDEO (bytes) ở key riêng — không nhồi vào cfg/state (tránh GET_STATE nặng).
+      case 'PUT_MEDIA': {
+        const id = await putMedia(request.id || '', request.dataUrl || '', request.name || 'video.mp4');
+        sendResponse({ ok: true, id });
+        break;
+      }
+      case 'GET_MEDIA': {
+        const m = await getMedia(request.id);
+        sendResponse({ ok: !!m, dataUrl: m?.dataUrl || '', name: m?.name || '' });
+        break;
+      }
+      case 'DEL_MEDIA': { await delMedia(request.id); sendResponse({ ok: true }); break; }
       case 'START_AUTO': await startAuto(); sendResponse({ ok: true }); break;
       case 'STOP_AUTO': await stopAuto(false); sendResponse({ ok: true }); break;
       case 'KILL': await stopAuto(true); sendResponse({ ok: true }); break;
@@ -1965,7 +2050,7 @@ async function handle(request, sendResponse) {
         break;
       }
       case 'JOIN_GROUP': { const res = await joinGroupById(request.groupId); sendResponse({ ok: res.ok, skipped: !!res.skipped, needQuestions: !!res.needQuestions, error: res.ok || res.skipped ? '' : (res.error || JSON.stringify(res.errors || 'join_failed')) }); break; }
-      case 'POST_GROUP': { const r = await postToGroup(request.groupId, request.message || '', request.link || '', { bgPresetId: request.bgPresetId || '', images: request.images || [], allowRepost: !!request.allowRepost }); sendResponse({ ok: r.ok, skipped: !!r.skipped, alreadyPosted: !!r.alreadyPosted, error: r.ok || r.skipped ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), postUrl: r.postUrl || '', quotaBlocked: !!r.quotaBlocked }); break; }
+      case 'POST_GROUP': { const r = await postToGroup(request.groupId, request.message || '', request.link || '', { bgPresetId: request.bgPresetId || '', images: request.images || [], videoKey: request.videoKey || '', allowRepost: !!request.allowRepost }); sendResponse({ ok: r.ok, skipped: !!r.skipped, alreadyPosted: !!r.alreadyPosted, error: r.ok || r.skipped ? '' : (r.error || JSON.stringify(r.errors || 'post_failed')), postUrl: r.postUrl || '', quotaBlocked: !!r.quotaBlocked }); break; }
       // A) Đọc comment của 1 bài đã đăng → tìm khách (người comment = lead)
       case 'LIST_POST_COMMENTS': {
         try {
@@ -2080,11 +2165,11 @@ async function handle(request, sendResponse) {
         const title = String(p.title || (p.content || '').trim().split('\n')[0] || 'Bài không tên').slice(0, 80);
         // Có id + tồn tại → CẬP NHẬT tại chỗ (không tạo bản trùng). Ngược lại tạo mới.
         if (p.id && savedPosts.some(x => x.id === p.id)) {
-          const updated = savedPosts.map(x => x.id === p.id ? { ...x, title, content: p.content || '', link: p.link || '', bgPresetId: p.bgPresetId || '', ...(p.images !== undefined ? { images: p.images || [] } : {}) } : x);
+          const updated = savedPosts.map(x => x.id === p.id ? { ...x, title, content: p.content || '', link: p.link || '', bgPresetId: p.bgPresetId || '', ...(p.images !== undefined ? { images: p.images || [] } : {}), ...(p.videoKey !== undefined ? { videoKey: p.videoKey || '' } : {}) } : x);
           await save({ savedPosts: updated });
           sendResponse({ ok: true, post: updated.find(x => x.id === p.id), updated: true });
         } else {
-          const post = { id: 'pp_' + Date.now().toString(36), title, content: p.content || '', link: p.link || '', bgPresetId: p.bgPresetId || '', images: p.images || [], createdAt: Date.now() };
+          const post = { id: 'pp_' + Date.now().toString(36), title, content: p.content || '', link: p.link || '', bgPresetId: p.bgPresetId || '', images: p.images || [], videoKey: p.videoKey || '', createdAt: Date.now() };
           await save({ savedPosts: [post, ...savedPosts].slice(0, 100) });
           sendResponse({ ok: true, post, updated: false });
         }

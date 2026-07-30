@@ -17,6 +17,7 @@ function computeJazoest(dtsg) {           // thuật toán FB: "2" + tổng char
 function b64utf8(s) { try { return btoa(unescape(encodeURIComponent(s))); } catch { return btoa(s); } }
 function feedbackIdOf(postId) { return b64utf8('feedback:' + postId); }
 function rndId() { return String(1 + Math.floor(Math.random() * 1e6)); }
+function hex32() { let s = ''; for (let i = 0; i < 32; i++) s += ((Math.random() * 16) | 0).toString(16); return s; }
 function uuid() {
   // SW có crypto.randomUUID; fallback nếu thiếu
   try { return crypto.randomUUID(); } catch { return 'xxxxxxxxxxxx'.replace(/x/g, () => ((Math.random() * 16) | 0).toString(16)); }
@@ -293,8 +294,10 @@ async function fbPostComment(runFetch, creds, item, message) {
   const vars = {
     feedLocation: 'POST_PERMALINK_DIALOG', feedbackSource: 2, groupID: item.groupId || null,
     input: {
-      actor_id: creds.uid, client_mutation_id: rndId(), 
-      attachments: item.attachmentId ? [{ media: { id: String(item.attachmentId) } }] : null,
+      actor_id: creds.uid, client_mutation_id: rndId(),
+      // Video comment: gắn qua media.id (dùng video_id). Nếu không có video thì tới ảnh (attachmentId).
+      attachments: item.videoId ? [{ media: { id: String(item.videoId) } }]
+        : item.attachmentId ? [{ media: { id: String(item.attachmentId) } }] : null,
       feedback_id: fbId, formatting_style: null,
       message: { ranges: [], text: message }, attribution_id_v2: ATTRIB,
       vod_video_timestamp: null, is_tracking_encrypted: true,
@@ -553,6 +556,17 @@ function buildComposedText(text) {
   };
 }
 
+// Gắn video vào bài/story: shape lấy từ ComposerStoryCreateMutation thật (attachments[].video).
+function videoAttachment(videoId) {
+  return {
+    video: {
+      id: String(videoId), notify_when_processed: true,
+      was_created_via_unified_video_flow: { was_created_via_unified_video_flow: true },
+      audio_descriptions: null, additional_video_metadata: { translatedAudioMetadata: [] }, transcriptions: null,
+    },
+  };
+}
+
 // Đăng 1 bài (text + link tuỳ chọn) vào 1 nhóm. → { ok, postUrl, errors }
 async function fbCreateGroupPost(runFetch, creds, groupId, message, opts = {}) {
   const text = opts.link ? `${message}\n${opts.link}` : message;
@@ -562,7 +576,8 @@ async function fbCreateGroupPost(runFetch, creds, groupId, message, opts = {}) {
       logging: { composer_session_id: uuid() }, source: 'WWW',
       message: { ranges: [], text }, with_tags_ids: null, inline_activities: [],
       text_format_preset_id: opts.bgPresetId || '0', group_flair: { flair_id: null },
-      attachments: (opts.photoIds || []).map(id => ({ photo: { id } })),
+      // Ưu tiên video nếu có; nếu không thì dùng ảnh. (attachments là mảng — video/ảnh xài chung khóa)
+      attachments: opts.videoId ? [videoAttachment(opts.videoId)] : (opts.photoIds || []).map(id => ({ photo: { id } })),
       composed_text: buildComposedText(text), navigation_data: null, tracking: [null],
       event_share_metadata: { surface: 'newsfeed' }, audience: { to_id: String(groupId) },
       actor_id: creds.uid, client_mutation_id: rndId(),
@@ -599,6 +614,96 @@ async function fbUploadPhoto(runUpload, creds, dataUrl, name = 'photo.jpg') {
   const photoID = json?.payload?.photoID || json?.payload?.photo_id;
   if (!photoID) throw new Error('Upload ảnh thất bại: ' + (json?.errorSummary || json?.error?.message || 'không nhận được ảnh từ Facebook'));
   return String(photoID);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6b) UPLOAD VIDEO  ✅ giao thức thật (start → rupload bytes → receive)
+//     Trả về videoId để gắn vào bài (fbCreateGroupPost opts.videoId) hoặc comment (item.videoId).
+//     runFetch  = fetch urlencoded trong tab FB (start/receive).
+//     runRawUpload(url, headers, {base64, mime}) = POST body RAW (bytes) trong tab FB (rupload).
+// ─────────────────────────────────────────────────────────────────────────────
+const VIDEO_CFG = { FRIENDLY_NAME: 'MediaUploadFBDefaultServerConfigurationRetrieverQuery', DOC_ID: '26396735533340887' };
+
+// Host upload bytes: hỏi FB (targeted → gần nhất), fallback rupload.facebook.com.
+async function fbGetVideoUploadHost(runFetch, creds) {
+  try {
+    const json = await gql(runFetch, creds, VIDEO_CFG.FRIENDLY_NAME, VIDEO_CFG.DOC_ID, { source_type: 'newsfeed_composer' });
+    const svc = json?.data?.media_upload_config?.network_upload_service;
+    const name = svc?.targeted?.service_name || svc?.default?.service_name;
+    const dom = svc?.targeted?.service_domain || svc?.default?.service_domain || 'facebook.com';
+    if (name) return `https://${name}.${dom}`;
+  } catch { /* dùng fallback */ }
+  return 'https://rupload.facebook.com';
+}
+
+async function fbUploadVideo(runFetch, runRawUpload, creds, dataUrl, name = 'video.mp4', onProgress) {
+  if (!creds?.dtsg || !creds?.uid) throw new Error('Chưa kết nối Facebook (thiếu creds)');
+  const m = /^data:(.+?);base64,(.*)$/s.exec(String(dataUrl));
+  if (!m) throw new Error('Video không hợp lệ (cần dataURL base64)');
+  const mime = m[1] || 'video/mp4';
+  const base64 = m[2].replace(/\s+/g, '');
+  const pad = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+  const size = Math.floor(base64.length / 4) * 3 - pad;
+  if (size <= 0) throw new Error('Video rỗng');
+  const ext = (String(name).split('.').pop() || 'mp4').toLowerCase();
+  const waterfall = uuid();
+  const encName = encodeURIComponent(name);
+  const common = () => ({
+    av: creds.uid, __user: creds.uid, __a: '1', __req: (_req++).toString(36), dpr: '1',
+    fb_dtsg: creds.dtsg, jazoest: computeJazoest(creds.dtsg), lsd: creds.lsd || '', __comet_req: '15',
+  });
+  const wfHeader = { 'content-type': 'application/x-www-form-urlencoded', 'x_fb_video_waterfall_id': waterfall };
+
+  // ── B1: start → video_id, upload_session_id ──
+  if (onProgress) onProgress('start');
+  const startUrl = `https://vupload-edge.facebook.com/ajax/video/upload/requests/start/?av=${creds.uid}&__a=1`;
+  const startBody = new URLSearchParams({
+    waterfall_id: waterfall, target_id: creds.uid, source: 'newsfeed_composer', composer_entry_point_ref: 'feed',
+    supports_chunking: 'true', supports_file_api: 'true',
+    file_size: String(size), file_extension: ext,
+    partition_start_offset: '0', partition_end_offset: String(size), has_file_been_replaced: 'false',
+    ...common(),
+  }).toString();
+  const startJson = parseFbJson(await runFetch(startUrl, 'POST', startBody, wfHeader));
+  const p1 = startJson?.payload || startJson;
+  const videoId = p1?.video_id;
+  const uploadSessionId = p1?.upload_session_id;
+  if (!videoId) throw new Error('Không lấy được video_id từ Facebook (bước start)');
+
+  // ── B2: upload bytes → handle (resp.h) ──  (bỏ qua nếu FB báo skip_upload)
+  if (!p1?.skip_upload) {
+    if (onProgress) onProgress('bytes');
+    const host = await fbGetVideoUploadHost(runFetch, creds);
+    const qs = new URLSearchParams(common()).toString();
+    const upUrl = `${host}/fb_video/${hex32()}-0-${size}?${qs}`;
+    const upHeaders = {
+      offset: '0', start_offset: '0', end_offset: String(size),
+      'x-entity-length': String(size), 'x-entity-name': encName, 'x-entity-type': mime,
+      'x-total-asset-size': String(size), id: String(videoId), composer_session_id: waterfall,
+    };
+    if (uploadSessionId) upHeaders['product_media_id'] = String(uploadSessionId);
+    const upRaw = await runRawUpload(upUrl, upHeaders, { base64, mime });
+    let upJson; try { upJson = JSON.parse(String(upRaw).replace(/^for\s*\(\s*;\s*;\s*\)\s*;?/, '')); } catch { upJson = {}; }
+    const handle = upJson?.h;
+    if (!handle) throw new Error('Upload dữ liệu video thất bại: ' + String(upRaw).slice(0, 160));
+
+    // ── B3: receive (xác nhận) ── lỗi ở bước này KHÔNG chặn: bytes đã lên + video_id vẫn dùng được.
+    if (onProgress) onProgress('receive');
+    const rcvUrl = `https://vupload-edge.facebook.com/ajax/video/upload/requests/receive/?av=${creds.uid}&__a=1`;
+    const rcvBody = new URLSearchParams({
+      waterfall_id: waterfall, target_id: creds.uid, video_id: String(videoId),
+      source: 'newsfeed_composer', composer_entry_point_ref: 'feed',
+      supports_chunking: 'true', supports_upload_service: 'true',
+      partition_start_offset: '0', partition_end_offset: String(size),
+      start_offset: '0', end_offset: String(size), upload_speed: '0',
+      fbuploader_video_file_chunk: handle, has_file_been_replaced: 'false',
+      ...common(),
+    }).toString();
+    try { parseFbJson(await runFetch(rcvUrl, 'POST', rcvBody, wfHeader)); } catch { /* không chặn */ }
+  }
+
+  if (onProgress) onProgress('done');
+  return String(videoId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -788,4 +893,4 @@ async function fbLeaveGroup(runFetch, creds, group) {
   return { ok: !!json?.data && !json?.errors, errors: json?.errors || null };
 }
 
-self.ShopeFbApi = { fbFetchJoinedGroups, fbFetchGroupFeed, fbPostComment, fbSearchGroups, fbJoinGroup, fbCreateGroupPost, fbUploadPhoto, fbSearchPages, fbFetchPageFeed, fbListPostComments, fbHideComment, fbLeaveGroup, FB_GRAPHQL_URL, _gql: gql };
+self.ShopeFbApi = { fbFetchJoinedGroups, fbFetchGroupFeed, fbPostComment, fbSearchGroups, fbJoinGroup, fbCreateGroupPost, fbUploadPhoto, fbUploadVideo, fbSearchPages, fbFetchPageFeed, fbListPostComments, fbHideComment, fbLeaveGroup, FB_GRAPHQL_URL, _gql: gql };
