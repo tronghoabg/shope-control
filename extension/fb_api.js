@@ -591,10 +591,13 @@ async function fbCreateGroupPost(runFetch, creds, groupId, message, opts = {}) {
     isWorkSharedDraft: false, ...POST_RELAY,
   };
   const json = await gql(runFetch, creds, POST_MUTATION.FRIENDLY_NAME, POST_MUTATION.DOC_ID, variables);
-  const story = json?.data?.story_create?.story;
-  const postId = story?.legacy_story_hideable_id ?? json?.data?.story_create?.group_feed_story_edge?.node?.post_id;
+  const sc = json?.data?.story_create || {};
+  const story = sc.story;
+  // Bài VIDEO: FB trả story=null + post_id ở story_create (xử lý video async). Đọc thêm post_id/story_id
+  // để KHÔNG báo nhầm "thất bại" (gây retry/đăng trùng) khi thật ra đã đăng.
+  const postId = story?.legacy_story_hideable_id ?? sc.group_feed_story_edge?.node?.post_id ?? sc.post_id ?? null;
   const postUrl = story?.url ?? (postId ? `https://www.facebook.com/groups/${groupId}/permalink/${postId}/` : '');
-  return { ok: !!postUrl, postUrl, errors: json?.errors || null };
+  return { ok: !!(postUrl || sc.story_id), postUrl, errors: json?.errors || null };
 }
 
 // Upload 1 ảnh (dataURL) lên upload.facebook.com → trả về photoID.

@@ -44,7 +44,7 @@ export default function CommentGroups() {
   useEffect(() => {
     if (!cvKey) { setVideoPreview(null); return }
     if (videoPreview?.key === cvKey) return
-    call({ type: 'GET_MEDIA', id: cvKey }).then(r => {
+    ext({ type: 'GET_MEDIA', id: cvKey }).then(r => {
       if (r?.ok && r.dataUrl) setVideoPreview({ key: cvKey, url: r.dataUrl })
       else setVideoPreview(null)
     })
@@ -101,8 +101,11 @@ export default function CommentGroups() {
     if (!file.type.startsWith('image/')) return notify('red', 'Vui lòng chọn file ảnh hợp lệ')
     const reader = new FileReader()
     reader.onload = (ev) => {
-      setLocal({ ...cfgL, commentImageBase64: ev.target.result })
-      setCfg({ commentImageBase64: ev.target.result })
+      // Ảnh & video không dùng chung — chọn ảnh thì bỏ video (kẻo commitComment ưu tiên nhầm video cũ).
+      if (cfgL?.commentVideoKey) ext({ type: 'DEL_MEDIA', id: cfgL.commentVideoKey })
+      setVideoPreview(null)
+      setLocal({ ...cfgL, commentImageBase64: ev.target.result, commentVideoKey: null })
+      setCfg({ commentImageBase64: ev.target.result, commentVideoKey: null })
     }
     reader.readAsDataURL(file)
   }
@@ -120,8 +123,8 @@ export default function CommentGroups() {
     reader.onload = async (ev) => {
       const oldKey = cfgL?.commentVideoKey
       // Bytes lưu ở key riêng (không nhồi vào cfg → GET_STATE khỏi nặng). cfg chỉ giữ tham chiếu.
-      const r = await call({ type: 'PUT_MEDIA', dataUrl: ev.target.result, name: file.name })
-      if (oldKey) call({ type: 'DEL_MEDIA', id: oldKey })
+      const r = await ext({ type: 'PUT_MEDIA', dataUrl: ev.target.result, name: file.name })
+      if (oldKey) ext({ type: 'DEL_MEDIA', id: oldKey })
       const id = r?.id || ''
       setVideoPreview({ key: id, url: ev.target.result })
       // Video & ảnh không đính cùng — chọn video thì bỏ ảnh.
@@ -131,7 +134,7 @@ export default function CommentGroups() {
     reader.readAsDataURL(file)
   }
   const removeVideo = () => {
-    if (cfgL?.commentVideoKey) call({ type: 'DEL_MEDIA', id: cfgL.commentVideoKey })
+    if (cfgL?.commentVideoKey) ext({ type: 'DEL_MEDIA', id: cfgL.commentVideoKey })
     setVideoPreview(null)
     setLocal({ ...cfgL, commentVideoKey: null })
     setCfg({ commentVideoKey: null })
