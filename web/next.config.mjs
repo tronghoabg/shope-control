@@ -6,9 +6,15 @@ const nextConfig = {
   // working without requiring an extension update.
   skipTrailingSlashRedirect: true,
   // Control panel (Vite SPA) build vào public/app → phục vụ tại /app
+  async redirects() {
+    return [
+      // Chrome Web Store versions inject dashboard_bridge.js at /app/* only.
+      // Redirect old bookmarks before the document loads so Chrome matches it.
+      { source: '/app', destination: '/app/', permanent: false },
+    ]
+  },
   async rewrites() {
     return [
-      { source: '/app', destination: '/app/index.html' },
       { source: '/app/', destination: '/app/index.html' },
     ]
   },
