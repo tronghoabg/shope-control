@@ -31,8 +31,14 @@ export default function CommentGroups() {
 
   const pool = useMemo(() => {
     const m = new Map()
-    for (const g of (s?.discoveredGroups || [])) m.set(g.groupId, { id: g.groupId, name: g.name, score: g.score, icon: g.icon, url: g.url })
-    for (const g of (s?.searchResults || [])) if (!m.has(g.groupId)) m.set(g.groupId, { id: g.groupId, name: g.name, score: g.score, url: g.url })
+    for (const g of (s?.discoveredGroups || [])) {
+      const id = String(g.groupId ?? g.id ?? '')
+      if (id) m.set(id, { id, name: g.name, score: g.score, icon: g.icon, url: g.url })
+    }
+    for (const g of (s?.searchResults || [])) {
+      const id = String(g.groupId ?? g.id ?? '')
+      if (id && !m.has(id)) m.set(id, { id, name: g.name, score: g.score, url: g.url })
+    }
     for (const id of (s?.cfg?.groupIds || [])) if (!m.has(id)) m.set(id, { id, name: id })
     return [...m.values()].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
   }, [s?.discoveredGroups, s?.searchResults, s?.cfg?.groupIds])

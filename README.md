@@ -11,8 +11,8 @@ shope/
 ├── extension/          # Chrome MV3 — CHỈ là cầu nối (không có UI riêng)
 │   ├── inject.js              # lấy token + fb_dtsg từ tab Facebook đã đăng nhập
 │   ├── content_fb.js          # chạy fetch GraphQL trong tab facebook.com thật
-│   ├── fb_api.js              # adapter API nhóm + comment  ← [[CẦN ĐIỀN request chụp]]
-│   ├── ai.js                  # gọi thẳng Claude / OpenAI / Gemini (key lưu trong extension)
+│   ├── fb_api.js              # executor Facebook; operation IDs nhận động từ web, có fallback offline
+│   ├── ai.js                  # client gọi AI hệ thống trên web
 │   ├── catalog.js             # parse CSV + lọc SP theo từ khoá
 │   ├── background.js          # điều phối: scheduler + cap/ngày + delay + kill-switch
 │   └── dashboard_bridge.js    # cầu nối postMessage ↔ web app
@@ -20,8 +20,8 @@ shope/
 ```
 
 - **Extension không có popup/HTML.** Bấm icon extension sẽ mở web app.
-- **Không có server backend.** API key (Claude/OpenAI/Gemini) nhập thẳng trong web app,
-  lưu ở `chrome.storage.local`; extension gọi AI provider trực tiếp bằng `fetch`.
+- **Web app là bộ não từ v1.5.** Prompt/AI, quota và runtime policy được phát hành từ web;
+  extension giữ executor trình duyệt, scheduler nền và cache fallback.
 - Mọi thao tác Facebook chạy **trong trình duyệt của bạn** (tab facebook.com đã đăng nhập) —
   không gửi token/cookie đi đâu cả.
 
@@ -44,7 +44,7 @@ npm run dev          # mở http://localhost:5173
 4. Mở 1 tab `facebook.com` đã đăng nhập (để extension lấy creds + đăng comment).
 5. Bấm **Quét thử nhóm** rồi **Đăng 1 comment** để kiểm tra; ổn thì **Bật Auto**.
 
-> ⚠️ Trước khi auto chạy: điền request FB vào `extension/fb_api.js` theo [CAPTURE_FB_API.md](CAPTURE_FB_API.md).
+Chi tiết ranh giới và cơ chế cập nhật xem [ARCHITECTURE_V1_5.md](ARCHITECTURE_V1_5.md).
 
 ## ⚠️ Chống checkpoint (đọc kỹ)
 

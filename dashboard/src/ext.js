@@ -1,7 +1,9 @@
 // Cầu nối tới extension qua content script dashboard_bridge.js (window.postMessage).
+import { runWebCommand } from './webController.js'
 let _ready = false
 let _seq = 0
 const _pending = new Map()
+const SIGNAL_PROTOCOL = 1
 
 window.addEventListener('message', (e) => {
   if (e.source !== window || !e.data) return
@@ -14,13 +16,32 @@ window.addEventListener('message', (e) => {
 
 export function extReady() { return _ready }
 
-export function ext(payload, timeoutMs = 20000) {
+function sendSignal(payload, timeoutMs = 20000) {
   return new Promise((resolve) => {
     const id = ++_seq
     const timer = setTimeout(() => { _pending.delete(id); resolve({ ok: false, error: 'timeout: extension chưa cài hoặc chưa load trang này' }) }, timeoutMs)
     _pending.set(id, (res) => { clearTimeout(timer); resolve(res) })
-    window.postMessage({ __shopeReq: true, id, payload }, '*')
+    // v1.5: every feature uses the same versioned signal envelope. Call sites
+    // can keep passing { type, ...args }; this adapter owns the wire protocol.
+    const { type: action, ...args } = payload || {}
+    const signal = {
+      protocol: SIGNAL_PROTOCOL,
+      signalId: `web_${Date.now().toString(36)}_${id}`,
+      sentAt: Date.now(),
+      action,
+      payload: args,
+    }
+    window.postMessage({ __shopeReq: true, id, payload: { type: 'WEB_SIGNAL', signal } }, '*')
   })
+}
+
+export async function ext(payload, timeoutMs = 20000) {
+  try {
+    const handled = await runWebCommand(payload, sendSignal)
+    return handled === null ? sendSignal(payload, timeoutMs) : handled
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error || 'Lỗi web controller') }
+  }
 }
 
 // Mở link Facebook: TÁI DÙNG tab facebook.com đang mở (điều hướng tab đó) thay vì luôn mở tab mới.

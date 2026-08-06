@@ -4,6 +4,10 @@ import { Logo, Badge } from '@/components/ui'
 import { SignOutBtn } from '@/components/dashboard'
 import { AdminNav } from '@/components/adminNav'
 
+// Admin data is request-bound (session + live database). Never execute these
+// queries during the production build or cache the result between users.
+export const dynamic = 'force-dynamic'
+
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   await requireAdmin()
   return (

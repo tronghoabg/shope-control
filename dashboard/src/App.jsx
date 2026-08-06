@@ -325,7 +325,7 @@ export default function App() {
 
           {/* ── FOOTER ── */}
           <footer className="flex h-11 shrink-0 items-center justify-between border-t border-slate-900/60 bg-slate-950/40 px-6 text-xs text-slate-500 backdrop-blur-sm">
-            <span>ToolMKT AI · Phiên bản 1.3</span>
+            <span>ToolMKT AI · Web runtime 1.5</span>
             <div className="flex items-center gap-4">
               <button onClick={() => setPage('guide')} className="hover:text-slate-300 font-medium">Tài liệu</button>
               <span className="text-slate-700">|</span>

@@ -18,6 +18,10 @@ export function ShopeProvider({ children }) {
   const triedConnect = useRef(false)
   const restoredGroups = useRef(false)
   const failCount = useRef(0)
+  const stateRef = useRef(null)
+  const controllerBusy = useRef(false)
+
+  useEffect(() => { stateRef.current = s }, [s])
 
   const notify = useCallback((color, message) => {
     const id = ++_toastSeq
@@ -101,6 +105,31 @@ export function ShopeProvider({ children }) {
     window.addEventListener('message', onReady)
     return () => { clearInterval(t); window.removeEventListener('message', onReady) }
   }, [refresh])
+
+  // v1.5 web controller lease. While this tab is healthy it owns Auto ticks;
+  // the extension alarm only acts as failover after the lease expires.
+  useEffect(() => {
+    if (!connected) return
+    let stopped = false
+    const pulse = async () => {
+      if (stopped || controllerBusy.current) return
+      controllerBusy.current = true
+      try {
+        await ext({ type: 'WEB_HEARTBEAT' }, 10000)
+        const st = stateRef.current
+        if (st?.job?.running && !st?.job?.paused) {
+          await ext({ type: 'JOB_TICK' }, 240000)
+          if (!stopped) refresh()
+        } else if (st?.cfg?.autoEnabled && !st?.cfg?.killSwitch) {
+          await ext({ type: 'AUTO_TICK' }, 240000)
+          if (!stopped) refresh()
+        }
+      } finally { controllerBusy.current = false }
+    }
+    pulse()
+    const timer = setInterval(pulse, 25000)
+    return () => { stopped = true; clearInterval(timer) }
+  }, [connected, refresh])
 
   const connectFb = useCallback(async (silent) => {
     const r = await ext({ type: 'CONNECT_FB' }, 20000)

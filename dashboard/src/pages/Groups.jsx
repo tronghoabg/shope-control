@@ -20,14 +20,19 @@ export default function Groups() {
   const [q, setQ] = useState('')
   if (!s) return <p className="text-slate-500">Đang tải danh sách nhóm…</p>
 
-  const groups = s.discoveredGroups || []
+  const groups = (s.discoveredGroups || [])
+    .map(g => ({ ...g, groupId: String(g.groupId ?? g.id ?? '') }))
+    .filter(g => g.groupId)
   const targets = s.cfg?.groupIds || []
   const targetSet = new Set(targets)
   const syncedAt = s.groupsSyncedAt ? new Date(s.groupsSyncedAt).toLocaleString('vi') : 'chưa quét'
 
   const nameMap = {}
   for (const g of groups) nameMap[g.groupId] = g.name
-  for (const g of (s.searchResults || [])) if (!nameMap[g.groupId]) nameMap[g.groupId] = g.name
+  for (const g of (s.searchResults || [])) {
+    const id = String(g.groupId ?? g.id ?? '')
+    if (id && !nameMap[id]) nameMap[id] = g.name
+  }
 
   const saveTargets = (ids) => call({ type: 'SET_TARGETS', groupIds: [...new Set(ids)] })
   const toggle = (id) => saveTargets(targetSet.has(id) ? targets.filter(x => x !== id) : [...targets, id])

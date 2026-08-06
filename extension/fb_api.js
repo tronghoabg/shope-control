@@ -896,4 +896,21 @@ async function fbLeaveGroup(runFetch, creds, group) {
   return { ok: !!json?.data && !json?.errors, errors: json?.errors || null };
 }
 
-self.ShopeFbApi = { fbFetchJoinedGroups, fbFetchGroupFeed, fbPostComment, fbSearchGroups, fbJoinGroup, fbCreateGroupPost, fbUploadPhoto, fbUploadVideo, fbSearchPages, fbFetchPageFeed, fbListPostComments, fbHideComment, fbLeaveGroup, FB_GRAPHQL_URL, _gql: gql };
+// Apply the volatile operation ids supplied by the v1.5 web runtime. Unknown or
+// malformed values are ignored, so the bundled ids remain a safe offline fallback.
+function configureRuntime(operations) {
+  const targets = {
+    joinedGroups: JOINED_GROUPS, groupFeed: GROUP_FEED, comment: COMMENT,
+    groupSearch: SEARCH, joinGroup: JOIN, createPost: POST_MUTATION,
+    videoConfig: VIDEO_CFG, pageSearch: PAGE_SEARCH, pageFeed: PAGE_FEED,
+    postComments: POST_COMMENTS, hideComment: HIDE_COMMENT, leaveGroup: LEAVE,
+  };
+  for (const [key, target] of Object.entries(targets)) {
+    const value = operations?.[key];
+    if (!value || !/^\d{5,}$/.test(String(value.docId || ''))) continue;
+    target.DOC_ID = String(value.docId);
+    if (typeof value.friendlyName === 'string' && value.friendlyName.trim()) target.FRIENDLY_NAME = value.friendlyName.trim();
+  }
+}
+
+self.ShopeFbApi = { fbFetchJoinedGroups, fbFetchGroupFeed, fbPostComment, fbSearchGroups, fbJoinGroup, fbCreateGroupPost, fbUploadPhoto, fbUploadVideo, fbSearchPages, fbFetchPageFeed, fbListPostComments, fbHideComment, fbLeaveGroup, configureRuntime, FB_GRAPHQL_URL, _gql: gql };

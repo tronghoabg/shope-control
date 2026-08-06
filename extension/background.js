@@ -32,12 +32,52 @@ const DEFAULTS = {
   shopeeLimit: 10,            // số SP lấy về mỗi lần search Shopee
 };
 
+const RUNTIME_PROTOCOL_VERSION = 1;
+const RUNTIME_CACHE_FALLBACK_MS = 6 * 60 * 60 * 1000;
+const WEB_LEASE_MS = 45 * 1000;
+let _runtimePolicy = null;
+const _recentSignals = new Map();
+
+function applyRuntimePolicy(policy) {
+  if (!policy || policy.protocolVersion !== RUNTIME_PROTOCOL_VERSION) return false;
+  _runtimePolicy = policy;
+  try { self.ShopeFbApi.configureRuntime(policy.facebookOperations); } catch {}
+  return true;
+}
+
+function receiveSignal(request) {
+  // v1.4 messages remain accepted during rollout. All v1.5 dashboard calls
+  // arrive through this one receiver and are normalized for existing executors.
+  if (request?.type !== 'WEB_SIGNAL') return { request, signalId: null };
+  const signal = request.signal;
+  if (!signal || signal.protocol !== RUNTIME_PROTOCOL_VERSION) throw new Error('Signal protocol không tương thích');
+  if (typeof signal.action !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(signal.action)) throw new Error('Signal action không hợp lệ');
+  if (Math.abs(Date.now() - Number(signal.sentAt || 0)) > 10 * 60 * 1000) throw new Error('Signal đã hết hạn');
+  const signalId = String(signal.signalId || '');
+  if (!signalId) throw new Error('Signal thiếu id');
+  if (_recentSignals.has(signalId)) return { duplicate: _recentSignals.get(signalId), signalId };
+  return { request: { ...(signal.payload || {}), type: signal.action }, signalId };
+}
+
+function rememberSignal(signalId, response) {
+  if (!signalId) return;
+  _recentSignals.set(signalId, response);
+  if (_recentSignals.size > 200) _recentSignals.delete(_recentSignals.keys().next().value);
+}
+
+async function webLeaseActive() {
+  try { return Number((await chrome.storage.session.get('webLeaseUntil')).webLeaseUntil || 0) > Date.now(); }
+  catch { return false; }
+}
+
 // Lỗi AI "cứng" → dừng cả mẻ quét/đăng + báo rõ (thay vì lặp lỗi từng nhóm).
 const HARD_AI_ERRORS = new Set(['AI_CAP', 'NO_SYSTEM_KEY', 'BANNED', 'RATE_LIMIT', 'TOO_LARGE', 'UNAUTHORIZED']);
 
 async function getCfg() {
-  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license', 'savedGroupLists', 'savedPosts', 'targetPages', 'savedPageLists', 'pageSearchResults', 'searchCursors', 'searchKeywords', 'searchHasMore', 'pageSearchCursors', 'pageSearchKeywords', 'pageHasMore', 'job', 'pendingPosts']);
+  const s = await chrome.storage.local.get(['cfg', 'state', 'stats', 'commentedPosts', 'queue', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'logs', 'searchResults', 'searchAt', 'commentHistory', 'progress', 'license', 'savedGroupLists', 'savedPosts', 'targetPages', 'savedPageLists', 'pageSearchResults', 'searchCursors', 'searchKeywords', 'searchHasMore', 'pageSearchCursors', 'pageSearchKeywords', 'pageHasMore', 'job', 'pendingPosts', 'runtimePolicy']);
+  if (!_runtimePolicy && s.runtimePolicy?.data) applyRuntimePolicy(s.runtimePolicy.data);
   return {
+    runtime: s.runtimePolicy || null,
     job: s.job || null,   // chiến dịch đăng hàng loạt đang chạy nền (SW)
     pendingPosts: s.pendingPosts || [],   // [{ postId, groupId, groupName, snippet, postUrl, postedAt, status }] — bài chờ duyệt
     savedGroupLists: s.savedGroupLists || [],   // [{ id, name, groupIds:[], createdAt }]
@@ -49,7 +89,7 @@ async function getCfg() {
     searchCursors: s.searchCursors || {}, searchKeywords: s.searchKeywords || [], searchHasMore: !!s.searchHasMore,
     pageSearchCursors: s.pageSearchCursors || {}, pageSearchKeywords: s.pageSearchKeywords || [], pageHasMore: !!s.pageHasMore,
     progress: s.progress || { active: false, phase: '', label: '', current: 0, total: 0, updatedAt: 0 },
-    cfg: { ...DEFAULTS, ...(s.cfg || {}) },
+    cfg: { ...DEFAULTS, ...(_runtimePolicy?.defaults || {}), ...(s.cfg || {}) },
     state: { dateKey: '', doneToday: 0, nextActionAt: 0, groupIdx: 0, cursor: null, ...(s.state || {}) },
     stats: { totalCommented: 0, lastRunAt: 0, lastError: '', ...(s.stats || {}) },
     commentedPosts: s.commentedPosts || {},
@@ -108,8 +148,12 @@ function todayKey() {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 const MIN_DELAY_SEC = 90;   // an toàn checkpoint: không cho nhanh hơn 90s giữa 2 lần đăng
+function runtimeSafety(key, fallback) {
+  const n = Number(_runtimePolicy?.safety?.[key]);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
 function rndDelaySec(cfg) {
-  const lo = Math.max(MIN_DELAY_SEC, cfg.minDelaySec | 0);
+  const lo = Math.max(MIN_DELAY_SEC, runtimeSafety('minCommentDelaySec', MIN_DELAY_SEC), cfg.minDelaySec | 0);
   const hi = Math.max(lo + 5, cfg.maxDelaySec | 0);
   return Math.floor(lo + Math.random() * (hi - lo));
 }
@@ -124,6 +168,28 @@ async function webFetch(cfg, path, method = 'GET', body) {
     const r = await fetch((cfg.webBase || 'https://toolmktai.com').replace(/\/$/, '') + path, opts);
     return { status: r.status, json: await r.json().catch(() => ({})) };
   } catch (e) { return { status: 0, json: { error: String(e?.message || e) }, neterr: true }; }
+}
+
+async function refreshRuntimePolicy(cfg, force = false) {
+  const cached = (await chrome.storage.local.get('runtimePolicy')).runtimePolicy;
+  const ttl = Math.max(5 * 60 * 1000, Number(cached?.data?.cacheTtlSec || 0) * 1000 || RUNTIME_CACHE_FALLBACK_MS);
+  if (!force && cached?.data && Date.now() - Number(cached.fetchedAt || 0) < ttl) {
+    applyRuntimePolicy(cached.data);
+    return { ok: true, cached: true, ...cached };
+  }
+  const base = (cfg?.webBase || 'https://toolmktai.com').replace(/\/$/, '');
+  try {
+    const response = await fetch(base + '/api/extension/runtime', { cache: 'no-store' });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const data = await response.json();
+    if (!applyRuntimePolicy(data)) throw new Error('runtime protocol không tương thích');
+    const runtimePolicy = { data, fetchedAt: Date.now(), source: base };
+    await chrome.storage.local.set({ runtimePolicy });
+    return { ok: true, cached: false, ...runtimePolicy };
+  } catch (e) {
+    if (cached?.data && applyRuntimePolicy(cached.data)) return { ok: true, cached: true, stale: true, ...cached, error: String(e?.message || e) };
+    return { ok: false, error: String(e?.message || e) };
+  }
 }
 
 // Kiểm tra còn lượt trước khi đăng. Trả { ok, unlinked?, plan, remaining, msg }
@@ -1261,7 +1327,7 @@ function swSpin(t) {
   return out;
 }
 function jobDelaySec(job) {
-  const floor = job.floor || MIN_DELAY_SEC;   // join: 20s; comment/post: 90s
+  const floor = job.floor || runtimeSafety('minCommentDelaySec', MIN_DELAY_SEC);
   const lo = Math.max(floor, Math.min(job.delayMin, job.delayMax));
   const hi = Math.max(lo, Math.max(job.delayMin, job.delayMax));
   return lo + Math.floor(Math.random() * (hi - lo + 1));
@@ -1304,14 +1370,19 @@ async function runJobItem(job, id, cfg) {
 }
 
 async function startJob(kind, items, params = {}) {
-  const list = (items || []).filter(Boolean);
+  const validKinds = new Set(['comment', 'join', 'postgroup']);
+  if (!validKinds.has(kind)) throw new Error('Loại chiến dịch không hợp lệ: ' + String(kind || ''));
+  // Never execute the same Facebook action twice because the UI sent duplicate ids.
+  const list = Array.from(new Set((items || []).filter(Boolean).map(String)));
   if (!list.length) throw new Error('Không có mục nào để chạy');
   const st = await getCfg();
   if (st.job && st.job.running) throw new Error('Đang có chiến dịch chạy nền — hãy DỪNG nó trước khi chạy cái mới.');
   // Chặn chạy song song với Auto: 2 luồng cùng thao tác 1 tab Facebook → dễ đăng trùng / checkpoint.
   if (st.cfg.autoEnabled && !st.cfg.killSwitch) throw new Error('Đang bật Auto — hãy TẮT Auto trước khi chạy chiến dịch nền (tránh trùng thao tác Facebook).');
   if (kind !== 'join') requireApiKey(st.cfg);   // join chỉ cần Facebook, không cần AI
-  const floor = kind === 'join' ? 20 : MIN_DELAY_SEC;   // join giãn cách tối thiểu 20s; comment/post 90s
+  const floor = kind === 'join'
+    ? runtimeSafety('minJoinDelaySec', 20)
+    : Math.max(MIN_DELAY_SEC, runtimeSafety('minCommentDelaySec', MIN_DELAY_SEC));
   const delayMin = Math.max(floor, params.delayMin || st.cfg.minDelaySec || floor);
   const delayMax = Math.max(delayMin, params.delayMax || st.cfg.maxDelaySec || delayMin);
   const gname = {};
@@ -1357,7 +1428,8 @@ async function jobStep() {
     cur.idx = curIdx + 1;
     // Tùy chọn "dừng ngay ở bài lỗi đầu tiên" (chỉ postgroup).
     if (!res.ok && !res.skipped && cur.params && cur.params.stopOnError) { cur.running = false; cur.stoppedMsg = 'Đã dừng ở mục lỗi đầu tiên (tùy chọn của bạn).'; await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); return; }
-    if (cur.consec >= 3) { cur.running = false; cur.stoppedMsg = 'Đã dừng: 3 mục lỗi liên tiếp — có thể Facebook đang chặn. Kiểm tra tài khoản trước khi chạy tiếp.'; await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); await pushLog('error', `⛔ ${cur.stoppedMsg}`); return; }
+    const maxErrors = Math.max(1, runtimeSafety('maxConsecutiveErrors', 3));
+    if (cur.consec >= maxErrors) { cur.running = false; cur.stoppedMsg = `Đã dừng: ${maxErrors} mục lỗi liên tiếp — có thể Facebook đang chặn. Kiểm tra tài khoản trước khi chạy tiếp.`; await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); await pushLog('error', `⛔ ${cur.stoppedMsg}`); return; }
     if (cur.idx >= cur.total) { cur.running = false; cur.finishedAt = Date.now(); await save({ job: cur }); await chrome.alarms.clear(JOB_ALARM); await pushLog('success', `✓ Xong chiến dịch nền: ${cur.results.filter(r => r.status === 'success').length}/${cur.total}`); return; }
     // Bỏ qua (không gửi request tới FB) → chuyển bài kế NGAY, khỏi chờ giãn cách.
     cur.nextAt = res.skipped ? Date.now() : Date.now() + jobDelaySec(cur) * 1000;
@@ -1397,7 +1469,7 @@ async function _processOneStep(opts = {}) {
       // Quét LIÊN TIẾP nhiều nhóm cho tới khi tìm được bài (đọc feed là thao tác đọc — không cần chờ giữa các nhóm).
       // refillQueue tự tăng groupIdx + lưu cursor mỗi lần → mỗi vòng quét 1 nhóm khác.
       let n = 0;
-      const maxTries = Math.min(cfg.groupIds.length, 5);
+      const maxTries = Math.min(cfg.groupIds.length, Math.max(1, runtimeSafety('maxGroupsPerAutoScan', 5)));
       for (let t = 0; t < maxTries; t++) { n = await refillQueue(); if (n) break; }
       // Đọc lại CẢ state (groupIdx/cursor đã đổi) — nếu chỉ đọc queue thì state cũ ghi đè groupIdx → kẹt quét 1 nhóm.
       ({ queue, state } = await getCfg());
@@ -1409,7 +1481,10 @@ async function _processOneStep(opts = {}) {
         return { skipped: 'không có bài tiềm năng mới' };
       }
     } catch (e) {
-      await save({ stats: { ...stats, lastError: String(e?.message || e), lastRunAt: Date.now() } });
+      // Keep the local snapshot in sync before note() adds autoNote. Otherwise
+      // note() writes the older object back and silently erases these fields.
+      stats = { ...stats, lastError: String(e?.message || e), lastRunAt: Date.now() };
+      await save({ stats });
       await note('err', `⚠ Auto lỗi khi quét: ${String(e?.message || e)}`);
       return { error: String(e?.message || e) };
     }
@@ -1763,8 +1838,10 @@ function notify(title, message) {
 
 // ─── Alarm tick ──────────────────────────────────────────────────────────────
 chrome.alarms.onAlarm.addListener(async (a) => {
-  if (a.name === TICK_ALARM) { try { await processOneStep(); } catch (e) { console.warn(e); } }
-  else if (a.name === JOB_ALARM) { try { await jobStep(); } catch (e) { console.warn(e); } }
+  // While the web controller owns a live lease, it emits AUTO_TICK itself.
+  // Alarm remains as failover and resumes after the web tab disappears.
+  if (a.name === TICK_ALARM) { try { if (!(await webLeaseActive())) await processOneStep(); } catch (e) { console.warn(e); } }
+  else if (a.name === JOB_ALARM) { try { if (!(await webLeaseActive())) await jobStep(); } catch (e) { console.warn(e); } }
 });
 
 // Bấm icon extension → mở (hoặc focus) control panel tại {webBase}/app
@@ -1842,7 +1919,8 @@ async function bootstrap() {
   await installFbDnr();
   try {
     const { cfg, job } = await getCfg();
-    if (cfg.autoEnabled && !cfg.killSwitch) chrome.alarms.create(TICK_ALARM, { periodInMinutes: 0.5 });
+    await refreshRuntimePolicy(cfg);
+    if (cfg.autoEnabled && !cfg.killSwitch && !cfg.webOwned) chrome.alarms.create(TICK_ALARM, { periodInMinutes: 0.5 });
     // Chiến dịch đăng nền còn dở → tạo lại alarm để chạy tiếp sau khi mở lại Chrome / reload extension.
     if (job && job.running) chrome.alarms.create(JOB_ALARM, { periodInMinutes: 0.5 });
   } catch {}
@@ -1865,15 +1943,117 @@ async function startAuto() {
 async function stopAuto(kill) {
   const { cfg } = await getCfg();
   await save({ cfg: { ...cfg, autoEnabled: false, ...(kill ? { killSwitch: true } : {}) } });
-  chrome.alarms.clear(TICK_ALARM);
+  await chrome.alarms.clear(TICK_ALARM);
   await pushLog('info', kill ? '■ DỪNG NGAY (kill-switch)' : '⏸ Tắt Auto');
 }
 
 // ─── Message bus: popup + dashboard (externally_connectable) ──────────────────
 async function handle(request, sendResponse) {
+  const nativeSendResponse = sendResponse;
+  let signalId = null;
+  const respond = (value) => { rememberSignal(signalId, value); nativeSendResponse(value); };
   try {
+    const received = receiveSignal(request);
+    if (received.duplicate) { sendResponse(received.duplicate); return; }
+    request = received.request;
+    signalId = received.signalId;
+    // Route every existing case through the common responder without rewriting
+    // each executor. This also records idempotent signal responses.
+    sendResponse = respond;
     switch (request?.type) {
-      case 'PING': sendResponse({ ok: true, version: chrome.runtime.getManifest().version }); break;
+      case 'PING': sendResponse({ ok: true, version: chrome.runtime.getManifest().version, protocolVersion: RUNTIME_PROTOCOL_VERSION, capabilities: ['signal-envelope', 'runtime-policy', 'web-controller-lease', 'facebook-executor', 'background-failover', 'media-store'] }); break;
+      case 'WEB_HEARTBEAT': await chrome.storage.session.set({ webLeaseUntil: Date.now() + WEB_LEASE_MS }); sendResponse({ ok: true, leaseMs: WEB_LEASE_MS }); break;
+      case 'AUTO_TICK': {
+        await chrome.storage.session.set({ webLeaseUntil: Date.now() + WEB_LEASE_MS });
+        const result = await processOneStep();
+        sendResponse({ ok: true, result });
+        break;
+      }
+      case 'JOB_TICK': {
+        await chrome.storage.session.set({ webLeaseUntil: Date.now() + WEB_LEASE_MS });
+        await jobStep();
+        sendResponse({ ok: true });
+        break;
+      }
+      // v1.5 atomic executors. They do not choose targets, manage queues/cursors,
+      // call AI or schedule work; the web controller owns those decisions.
+      case 'EXEC_GET_JOINED_GROUPS': {
+        const creds = await ensureCreds();
+        const groups = await self.ShopeFbApi.fbFetchJoinedGroups(runFetchInFbTab, creds, request.opts || {});
+        sendResponse({ ok: true, groups }); break;
+      }
+      case 'EXEC_FETCH_GROUP_FEED': {
+        const creds = await ensureCreds();
+        const feed = await self.ShopeFbApi.fbFetchGroupFeed(runFetchInFbTab, creds, String(request.groupId || ''), request.cursor || null, request.count || 5);
+        sendResponse({ ok: true, feed }); break;
+      }
+      case 'EXEC_POST_COMMENT': {
+        const creds = await ensureCreds();
+        const item = { ...(request.item || {}) };
+        if (!String(request.message || '').trim() && !request.videoKey && !request.imageBase64) { sendResponse({ ok: false, error: 'Nội dung comment rỗng' }); break; }
+        if (request.videoKey) item.videoId = await getUploadedVideoIdByKey(creds, request.videoKey, 'đính kèm comment');
+        else if (request.imageBase64) item.attachmentId = await getCommentPhotoId(creds, request.imageBase64);
+        const result = await self.ShopeFbApi.fbPostComment(runFetchInFbTab, creds, item, String(request.message || ''));
+        sendResponse({ ok: !!result.ok, result, error: result.ok ? '' : JSON.stringify(result.errors || 'comment_failed') }); break;
+      }
+      case 'EXEC_SEARCH_GROUPS': {
+        const creds = await ensureCreds();
+        const result = await self.ShopeFbApi.fbSearchGroups(runFetchInFbTab, creds, String(request.keyword || ''), request.cursor || null);
+        sendResponse({ ok: true, ...result }); break;
+      }
+      case 'EXEC_JOIN_GROUP': {
+        const creds = await ensureCreds();
+        const result = await self.ShopeFbApi.fbJoinGroup(runFetchInFbTab, creds, { groupId: String(request.groupId || '') });
+        sendResponse({ ok: !!result.ok, result, needQuestions: !!result.needQuestions, error: result.ok ? '' : JSON.stringify(result.errors || 'join_failed') }); break;
+      }
+      case 'EXEC_LEAVE_GROUP': {
+        const creds = await ensureCreds();
+        const result = await self.ShopeFbApi.fbLeaveGroup(runFetchInFbTab, creds, { groupId: String(request.groupId || '') });
+        sendResponse({ ok: !!result.ok, result, error: result.ok ? '' : JSON.stringify(result.errors || 'leave_failed') }); break;
+      }
+      case 'EXEC_CREATE_GROUP_POST': {
+        const creds = await ensureCreds();
+        const result = await self.ShopeFbApi.fbCreateGroupPost(runFetchInFbTab, creds, String(request.groupId || ''), String(request.message || ''), { link: request.link || '', bgPresetId: request.bgPresetId || '', photoIds: request.photoIds || [], videoId: request.videoId || '' });
+        sendResponse({ ok: !!result.ok, result, postUrl: result.postUrl || '', error: result.ok ? '' : JSON.stringify(result.errors || 'post_failed') }); break;
+      }
+      case 'EXEC_SEARCH_PAGES': {
+        const creds = await ensureCreds();
+        const result = await self.ShopeFbApi.fbSearchPages(runFetchInFbTab, creds, String(request.keyword || ''), request.cursor || null);
+        sendResponse({ ok: true, ...result }); break;
+      }
+      case 'EXEC_FETCH_PAGE_FEED': {
+        const creds = await ensureCreds();
+        const feed = await self.ShopeFbApi.fbFetchPageFeed(runFetchInFbTab, creds, String(request.pageId || ''), request.cursor || null, request.count || 5);
+        sendResponse({ ok: true, feed }); break;
+      }
+      case 'EXEC_LIST_COMMENTS': {
+        const creds = await ensureCreds();
+        const result = await self.ShopeFbApi.fbListPostComments(runFetchInFbTab, creds, String(request.postId || ''), request.cursor || null);
+        sendResponse({ ok: true, ...result }); break;
+      }
+      case 'EXEC_HIDE_COMMENT': {
+        const creds = await ensureCreds();
+        const result = await self.ShopeFbApi.fbHideComment(runFetchInFbTab, creds, String(request.commentId || ''));
+        sendResponse({ ok: !!result.ok, result, error: result.ok ? '' : JSON.stringify(result.errors || 'hide_failed') }); break;
+      }
+      case 'EXEC_SEARCH_SHOPEE': {
+        const items = await searchShopeeDom(String(request.keyword || ''), request.limit || 10, { focus: request.focus });
+        sendResponse({ ok: true, items }); break;
+      }
+      case 'EXEC_MAKE_AFFILIATE_LINKS': {
+        const links = (request.links || []).map(String).filter(Boolean);
+        const results = await makeBatchLinks(links.map(originalLink => ({ originalLink, subIds: buildSubIds(request.subId || '') })));
+        sendResponse({ ok: true, results }); break;
+      }
+      case 'EXEC_CONFIGURE_FAILOVER': {
+        const { cfg } = await getCfg();
+        const enabled = !!request.autoEnabled;
+        // v1.5 web-owned campaigns must stop with the web controller. Do not run
+        // the legacy state machine against a separate chrome.storage queue.
+        await save({ cfg: { ...cfg, autoEnabled: enabled, killSwitch: !!request.killSwitch, webOwned: true } });
+        await chrome.alarms.clear(TICK_ALARM);
+        sendResponse({ ok: true }); break;
+      }
       // Mở link Facebook: tái dùng 1 tab facebook.com đang mở (điều hướng tab đó) thay vì luôn mở tab mới.
       case 'OPEN_FB_URL': {
         const url = String(request.url || '');
@@ -1895,6 +2075,7 @@ async function handle(request, sendResponse) {
       case 'GET_STATE': sendResponse({ ok: true, ...(await getCfg()), conn: await getConn(), shopee: await getShopeeConn() }); break;
       case 'CONNECT_FB': sendResponse({ ok: true, conn: await connectFb() }); break;
       case 'CHECK_LICENSE': { const { cfg } = await getCfg(); const lic = await refreshLicense(cfg); sendResponse({ ok: true, license: lic }); break; }
+      case 'REFRESH_RUNTIME': { const { cfg } = await getCfg(); sendResponse(await refreshRuntimePolicy(cfg, true)); break; }
       case 'SET_CFG': {
         const { cfg } = await getCfg();
         await save({ cfg: { ...cfg, ...(request.cfg || {}) } });

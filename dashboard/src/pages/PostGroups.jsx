@@ -69,14 +69,18 @@ export default function PostGroups() {
 
   const pool = useMemo(() => {
     const m = new Map()
-    for (const g of (s?.discoveredGroups || [])) m.set(g.groupId, { id: g.groupId, name: g.name, score: g.score, icon: g.icon, url: g.url })
-    for (const g of (s?.searchResults || [])) if (!m.has(g.groupId)) m.set(g.groupId, { id: g.groupId, name: g.name, score: g.score, url: g.url })
+    for (const g of (s?.discoveredGroups || [])) {
+      const id = String(g.groupId ?? g.id ?? '')
+      if (id) m.set(id, { id, name: g.name, score: g.score, icon: g.icon, url: g.url })
+    }
+    for (const g of (s?.searchResults || [])) {
+      const id = String(g.groupId ?? g.id ?? '')
+      if (id && !m.has(id)) m.set(id, { id, name: g.name, score: g.score, url: g.url })
+    }
     for (const id of (s?.cfg?.groupIds || [])) if (!m.has(id)) m.set(id, { id, name: id })
     return [...m.values()].sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
   }, [s?.discoveredGroups, s?.searchResults, s?.cfg?.groupIds])
   const nameMap = useMemo(() => Object.fromEntries(pool.map(g => [g.id, g.name])), [pool])
-
-  if (!s) return <p className="text-slate-500">Đang tải dữ liệu chiến dịch…</p>
 
   const variants = content.split(/\n=+\s*\n/).map(v => v.trim()).filter(Boolean)
   const hasVar = variants.length > 1
@@ -84,6 +88,9 @@ export default function PostGroups() {
   const [pvSeed, setPvSeed] = useState(0)
   // Ổn định preview (chỉ đổi khi sửa nội dung hoặc bấm "Đổi biến thể") + xoay vòng các biến thể.
   const preview = useMemo(() => spin(variants[pvSeed % Math.max(1, variants.length)] || content), [content, pvSeed]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!s) return <p className="text-slate-500">Đang tải dữ liệu chiến dịch…</p>
+
   const bgDisabled = images.length > 0 || !!video || !!link.trim()
   const activeBg = !bgDisabled ? BG_PRESETS.find(b => b.id === bg) : null
   const shownPool = gFilter.trim() ? pool.filter(g => (g.name || '').toLowerCase().includes(gFilter.trim().toLowerCase())) : pool
