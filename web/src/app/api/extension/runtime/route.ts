@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server'
 // upstream changes without publishing a new Chrome Web Store package.
 const runtime = {
   protocolVersion: 1,
-  revision: '2026-08-06.1',
+  revision: '2026-08-07.1',
   minExtensionVersion: '1.5.0',
   cacheTtlSec: 6 * 60 * 60,
   defaults: {
@@ -14,6 +14,7 @@ const runtime = {
     maxDelaySec: 240,
     minScore: 60,
     postsPerScan: 5,
+    maxPostAgeHours: 72,
   },
   safety: {
     minCommentDelaySec: 90,
@@ -34,6 +35,7 @@ const runtime = {
     postComments: { friendlyName: 'CommentsListComponentsPaginationQuery', docId: '28148854324717105' },
     hideComment: { friendlyName: 'CometUFIHideCommentMutation', docId: '27488296064098098' },
     leaveGroup: { friendlyName: 'GroupCometLeaveForumMutation', docId: '27087223784277669' },
+    activityLog: { friendlyName: 'CometActivityLogStoriesListPaginationQuery', docId: '27478633398483911' },
   },
 } as const
 

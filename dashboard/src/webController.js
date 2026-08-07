@@ -1,10 +1,11 @@
 const STORE_KEY = 'toolmkt_web_state_v15'
+const POST_LOCK_KEY = 'toolmkt_web_post_locks_v15'
 let executorCfg = {}
 const OWNED_KEYS = [
   'cfg', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'searchResults', 'searchAt',
   'searchCursors', 'searchKeywords', 'searchHasMore', 'targetPages', 'pageSearchResults',
   'pageSearchCursors', 'pageSearchKeywords', 'pageHasMore', 'savedGroupLists',
-  'savedPageLists', 'savedPosts', 'queue', 'commentHistory', 'state', 'stats', 'job',
+  'savedPageLists', 'savedPosts', 'queue', 'commentHistory', 'commentedPostIds', 'activitySyncedAt', 'state', 'stats', 'job', 'logs',
 ]
 
 function load() {
@@ -16,6 +17,47 @@ function save(patch) {
   return next
 }
 function id(prefix) { return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6) }
+const lastLogAt = new Map()
+const postingPostIds = new Set()
+const controllerInstanceId = id('tab')
+function readPostLocks() {
+  try { return JSON.parse(localStorage.getItem(POST_LOCK_KEY) || '{}') || {} } catch { return {} }
+}
+function acquirePostLock(postId) {
+  const now = Date.now(), locks = readPostLocks()
+  for (const [key, value] of Object.entries(locks)) if (now - Number(value?.at || 0) > 24 * 60 * 60 * 1000) delete locks[key]
+  if (locks[postId]) return false
+  locks[postId] = { owner: controllerInstanceId, at: now }
+  localStorage.setItem(POST_LOCK_KEY, JSON.stringify(locks))
+  return readPostLocks()[postId]?.owner === controllerInstanceId
+}
+function releasePostLock(postId) {
+  const locks = readPostLocks()
+  if (locks[postId]?.owner === controllerInstanceId) {
+    delete locks[postId]
+    localStorage.setItem(POST_LOCK_KEY, JSON.stringify(locks))
+  }
+}
+function clip(value, max = 220) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  return text.length > max ? text.slice(0, max - 1) + '…' : text
+}
+function writeLog(level, msg, data = {}, dedupeKey = '', minIntervalMs = 0) {
+  const now = Date.now()
+  if (dedupeKey && now - Number(lastLogAt.get(dedupeKey) || 0) < minIntervalMs) return
+  if (dedupeKey) lastLogAt.set(dedupeKey, now)
+  const st = load()
+  const logs = [...(st.logs || []), { id: id('log'), t: now, level, msg, ...data }].slice(-1000)
+  save({ logs })
+}
+function groupInfo(st, groupId) {
+  const group = (st.discoveredGroups || []).find(g => String(g.groupId ?? g.id) === String(groupId))
+  return {
+    groupId: String(groupId),
+    groupName: group?.name || `Nhóm ${groupId}`,
+    groupUrl: group?.url || `https://www.facebook.com/groups/${groupId}`,
+  }
+}
 
 function todayKey() { const d = new Date(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}` }
 async function ai(task, args) {
@@ -47,64 +89,202 @@ function candidates(text, catalog) {
 
 async function scanGroups(execute, fresh = false, limitGroups = Infinity) {
   const st = load(), cfg = st.cfg || {}, ids = cfg.groupIds || []
-  if (!ids.length) return { ok: false, error: 'Chưa chọn nhóm mục tiêu' }
+  if (!ids.length) {
+    writeLog('error', 'Không thể quét: chưa chọn nhóm mục tiêu.')
+    return { ok: false, error: 'Chưa chọn nhóm mục tiêu' }
+  }
   const queue = [...(st.queue || [])], seen = new Set(queue.map(x => String(x.postId)))
-  const commented = new Set((st.commentHistory || []).map(x => String(x.postId)))
+  const commented = new Set([
+    ...(st.commentedPostIds || []).map(String),
+    ...(st.commentHistory || []).map(x => String(x.postId)),
+  ])
   const cursors = { ...(st.groupCursors || {}) }; let added = 0, firstError = null
   const countGroups = Math.min(ids.length, limitGroups), start = Number(st.groupIdx || 0) % ids.length
   const selectedIds = Array.from({ length: countGroups }, (_, n) => ids[(start + n) % ids.length])
+  writeLog('info', `Bắt đầu chu kỳ quét ${countGroups}/${ids.length} nhóm · tối đa ${cfg.postsPerScan || 5} bài/nhóm · ngưỡng AI ${cfg.minScore || 60} điểm.`)
   for (const groupId of selectedIds) {
+    const gi = groupInfo(st, groupId)
+    writeLog('info', `Đang quét ${gi.groupName}…`, { kind: 'group', ...gi, link: gi.groupUrl })
     const r = await execute({ type: 'EXEC_FETCH_GROUP_FEED', groupId, cursor: fresh ? null : cursors[groupId], count: cfg.postsPerScan || 5 }, 120000)
-    if (!r?.ok) { firstError ||= r?.error || 'Không đọc được feed nhóm'; continue }
+    if (!r?.ok) {
+      const error = r?.error || 'Không đọc được feed nhóm'
+      firstError ||= error
+      writeLog('error', `Quét nhóm thất bại: ${error}`, { kind: 'post', ...gi, link: gi.groupUrl })
+      continue
+    }
     cursors[groupId] = fresh ? null : (r.feed?.nextCursor || null)
-    for (const post of (r.feed?.posts || [])) {
-      if (seen.has(String(post.postId)) || commented.has(String(post.postId)) || !keywordOk(post.text, cfg.requiredKeywords, cfg.bannedKeywords)) continue
-      const cls = await ai('classify', { text: post.text, group: groupId, mode: cfg.mode || 'affiliate', seed: cfg.seedContent || '' })
-      if (!cls?.potential || Number(cls.score || 0) < Number(cfg.minScore || 60)) continue
-      let made
-      if (cfg.mode === 'social') made = cfg.seedContent
-        ? await ai('varySeed', { text: post.text, group: groupId, seed: cfg.seedContent, tone: cfg.tone })
-        : await ai('social', { text: post.text, group: groupId, tone: cfg.tone })
-      else {
-        let picks
-        if (cfg.productSource === 'shopee') {
-          const wanted = await ai('searchKeyword', { text: post.text, group: groupId })
-          if (!wanted?.wantProduct || !wanted.keyword) continue
-          const sr = await execute({ type: 'EXEC_SEARCH_SHOPEE', keyword: wanted.keyword, limit: cfg.shopeeLimit || 10 }, 120000)
-          picks = (sr?.items || []).slice(0, 8).map((p, i) => ({ id: `sp${i}`, name: p.name, category: '', price: Math.round(p.price || 0), keywords: [], link: p.productUrl }))
-        } else picks = candidates(post.text, st.catalog || [])
-        if (!picks.length) continue
-        made = await ai('suggestProduct', { text: post.text, group: groupId, tone: cfg.tone, candidates: picks })
-        if (cfg.productSource === 'shopee' && made?.link) {
-          const lr = await execute({ type: 'EXEC_MAKE_AFFILIATE_LINKS', links: [made.link], subId: cfg.subId || '' }, 120000)
-          const short = lr?.results?.[0]?.shortLink
-          if (!short) continue
-          made.comment = String(made.comment || '').split(made.link).join(short); made.link = short
-        }
+    const maxAgeHours = Math.max(1, Number(cfg.maxPostAgeHours || 72))
+    const oldestAllowed = Date.now() - maxAgeHours * 60 * 60 * 1000
+    const posts = [...(r.feed?.posts || [])].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+    writeLog('success', `Đã tải ${posts.length} bài từ ${gi.groupName}.`, { kind: 'post', ...gi })
+    for (let postNo = 0; postNo < posts.length; postNo++) {
+      const post = posts[postNo]
+      const postId = String(post.postId || '')
+      const link = post.permalink || `https://www.facebook.com/groups/${groupId}/posts/${postId}`
+      const meta = { kind: 'post', ...gi, postId, link, content: clip(post.text) }
+      const postTime = Number(post.createdAt || 0)
+      const ageLabel = postTime ? ` · đăng ${new Date(postTime).toLocaleString('vi')}` : ' · chưa lấy được thời gian đăng'
+      writeLog('info', `Đọc bài ${postNo + 1}/${posts.length}${ageLabel}: ${clip(post.text, 110) || '(không có nội dung chữ)'}`, meta)
+      if (!postId) { writeLog('info', 'Bỏ qua: Facebook không trả về ID bài viết.', meta); continue }
+      if (postTime && postTime < oldestAllowed) {
+        writeLog('info', `Bỏ qua: bài đã cũ hơn ${maxAgeHours} giờ.`, meta)
+        continue
       }
-      if (made?.skip || !made?.comment) continue
-      queue.push({ ...post, groupId: String(groupId), groupName: (st.discoveredGroups || []).find(g => String(g.groupId) === String(groupId))?.name || `Nhóm ${groupId}`, comment: made.comment, link: made.link || null, productName: made.productName || null, score: cls.score || made.score || 0, mode: cfg.mode || 'affiliate', approved: false, addedAt: Date.now() })
-      seen.add(String(post.postId)); added++
+      if (seen.has(postId)) { writeLog('info', 'Bỏ qua: bài này đã có trong hàng chờ.', meta); continue }
+      if (commented.has(postId)) { writeLog('info', 'Bỏ qua: đã comment bài này trước đó.', meta); continue }
+      if (!keywordOk(post.text, cfg.requiredKeywords, cfg.bannedKeywords)) {
+        writeLog('info', 'Bỏ qua: không khớp từ khóa bắt buộc hoặc chứa từ khóa cấm.', meta)
+        continue
+      }
+      writeLog('info', 'Đang nhờ AI đánh giá mức độ tiềm năng…', meta)
+      let cls
+      try {
+        cls = await ai('classify', { text: post.text, group: groupId, mode: cfg.mode || 'affiliate', seed: cfg.seedContent || '' })
+      } catch (error) {
+        writeLog('error', `AI đánh giá lỗi: ${error?.message || error}`, meta)
+        continue
+      }
+      const score = Number(cls?.score || 0)
+      if (!cls?.potential || score < Number(cfg.minScore || 60)) {
+        writeLog('info', `Bỏ qua: AI chấm ${score}/${cfg.minScore || 60} điểm${cls?.reason ? ` · ${clip(cls.reason, 140)}` : ''}.`, meta)
+        continue
+      }
+      writeLog('success', `Bài đạt ${score} điểm · đang soạn comment…`, meta)
+      let made
+      try {
+        if (cfg.mode === 'social') made = cfg.seedContent
+          ? await ai('varySeed', { text: post.text, group: groupId, seed: cfg.seedContent, tone: cfg.tone })
+          : await ai('social', { text: post.text, group: groupId, tone: cfg.tone })
+        else {
+          let picks
+          if (cfg.productSource === 'shopee') {
+            const wanted = await ai('searchKeyword', { text: post.text, group: groupId })
+            if (!wanted?.wantProduct || !wanted.keyword) { writeLog('info', 'Bỏ qua: AI không xác định được sản phẩm phù hợp.', meta); continue }
+            writeLog('info', `Đang tìm sản phẩm Shopee với từ khóa “${wanted.keyword}”…`, meta)
+            const sr = await execute({ type: 'EXEC_SEARCH_SHOPEE', keyword: wanted.keyword, limit: cfg.shopeeLimit || 10 }, 120000)
+            picks = (sr?.items || []).slice(0, 8).map((p, i) => ({ id: `sp${i}`, name: p.name, category: '', price: Math.round(p.price || 0), keywords: [], link: p.productUrl }))
+          } else picks = candidates(post.text, st.catalog || [])
+          if (!picks.length) { writeLog('info', 'Bỏ qua: không tìm thấy sản phẩm phù hợp trong nguồn đã chọn.', meta); continue }
+          made = await ai('suggestProduct', { text: post.text, group: groupId, tone: cfg.tone, candidates: picks })
+          if (cfg.productSource === 'shopee' && made?.link) {
+            writeLog('info', 'Đang tạo link affiliate Shopee…', meta)
+            const lr = await execute({ type: 'EXEC_MAKE_AFFILIATE_LINKS', links: [made.link], subId: cfg.subId || '' }, 120000)
+            const short = lr?.results?.[0]?.shortLink
+            if (!short) { writeLog('error', `Không tạo được link affiliate: ${lr?.error || 'không có link trả về'}.`, meta); continue }
+            made.comment = String(made.comment || '').split(made.link).join(short); made.link = short
+          }
+        }
+      } catch (error) {
+        writeLog('error', `Soạn comment lỗi: ${error?.message || error}`, meta)
+        continue
+      }
+      if (made?.skip || !made?.comment) { writeLog('info', `Bỏ qua: AI không tạo comment${made?.reason ? ` · ${clip(made.reason)}` : ''}.`, meta); continue }
+      queue.push({ ...post, groupId: String(groupId), groupName: gi.groupName, comment: made.comment, link: made.link || null, productName: made.productName || null, score: cls.score || made.score || 0, mode: cfg.mode || 'affiliate', approved: false, addedAt: Date.now() })
+      seen.add(postId); added++
+      writeLog('success', `Đã thêm vào hàng chờ · comment: “${clip(made.comment, 180)}”`, { ...meta, tag: cfg.mode === 'social' ? 'Comment dạo' : 'Rải link', content: clip(made.comment, 300) })
     }
   }
   save({ queue, groupCursors: cursors, groupIdx: (start + countGroups) % ids.length })
+  writeLog(added ? 'success' : 'info', `Kết thúc chu kỳ quét: thêm ${added} bài vào hàng chờ · hiện có ${queue.length} bài.`)
   if (!added && firstError) return { ok: false, error: firstError, queued: 0 }
   return { ok: true, queued: added }
+}
+
+async function syncFacebookActivity(execute, force = false) {
+  const before = load()
+  if (!force && Date.now() - Number(before.activitySyncedAt || 0) < 10 * 60 * 1000) return { ok: true, skipped: true, count: 0 }
+  writeLog('info', 'Đang đồng bộ Lịch sử hoạt động trực tiếp từ Facebook…', {}, 'activity-sync', 60 * 1000)
+  let cursor = null, items = []
+  try {
+    for (let page = 0; page < 4; page++) {
+      const r = await execute({ type: 'EXEC_FETCH_ACTIVITY_LOG', cursor, count: 50 }, 120000)
+      if (!r?.ok) throw new Error(r?.error || 'Facebook không trả Activity Log')
+      items.push(...(r.items || []))
+      cursor = r.nextCursor || null
+      if (!r.hasMore || !cursor) break
+    }
+  } catch (error) {
+    writeLog('error', `Không đồng bộ được Activity Log: ${error?.message || error}. Auto tiếp tục dùng dữ liệu chống trùng đã lưu.`, {}, 'activity-error', 10 * 60 * 1000)
+    return { ok: false, error: String(error?.message || error) }
+  }
+  const current = load(), oldHistory = current.commentHistory || []
+  const byKey = new Map(oldHistory.map(x => [`${x.kind || x.mode || ''}:${x.commentId || x.postId}:${x.time || x.createdAt || ''}`, x]))
+  for (const item of items) {
+    const normalized = { ...item, time: item.createdAt || Date.now(), comment: item.kind === 'comment' ? item.content : undefined }
+    byKey.set(`${item.kind || item.mode}:${item.commentId || item.postId}:${normalized.time}`, normalized)
+  }
+  const history = [...byKey.values()].sort((a, b) => Number(b.time || b.createdAt || 0) - Number(a.time || a.createdAt || 0)).slice(0, 1000)
+  const commentedPostIds = [...new Set([
+    ...(current.commentedPostIds || []).map(String),
+    ...items.filter(x => x.kind === 'comment').map(x => String(x.postId)).filter(Boolean),
+  ])].slice(-5000)
+  save({ commentHistory: history, commentedPostIds, activitySyncedAt: Date.now() })
+  writeLog('success', `Đã đồng bộ ${items.length} hoạt động từ Facebook · nhận diện ${commentedPostIds.length} bài cần chống trùng.`)
+  return { ok: true, count: items.length, items }
 }
 
 async function postQueueItem(postId, execute) {
   const st = load(), queue = [...(st.queue || [])], at = queue.findIndex(x => String(x.postId) === String(postId))
   if (at < 0) return { ok: false, error: 'Không tìm thấy bài trong hàng chờ' }
   const item = queue[at], cfg = { ...(st.cfg || {}), ...executorCfg }
+  const postKey = String(item.postId || postId)
+  const alreadyCommented = new Set([
+    ...(st.commentedPostIds || []).map(String),
+    ...(st.commentHistory || []).map(x => String(x.postId)),
+  ])
+  const targetName = item.isPage ? (item.pageName || `Page ${item.pageId}`) : (item.groupName || `Nhóm ${item.groupId}`)
+  const targetId = item.isPage ? item.pageId : item.groupId
+  const targetMeta = {
+    kind: 'post', postId: postKey, groupId: String(targetId || ''),
+    groupName: targetName, link: item.permalink || '', content: clip(item.comment, 320),
+  }
+  if (alreadyCommented.has(postKey)) {
+    queue.splice(at, 1)
+    save({ queue })
+    writeLog('info', `Đã chặn đăng trùng: bài ${postKey} tại ${targetName} đã được comment trước đó.`, targetMeta)
+    return { ok: true, skipped: true, result: { skipped: 'Đã comment trước đó' } }
+  }
+  if (postingPostIds.has(postKey)) {
+    writeLog('info', `Đã chặn yêu cầu trùng đang chạy cho bài ${postKey}.`, targetMeta, `posting-${postKey}`, 60 * 1000)
+    return { ok: true, skipped: true, result: { skipped: 'Đang xử lý bài này' } }
+  }
   if (!String(item.comment || '').trim() && !cfg.commentImageBase64 && !cfg.commentVideoKey) return { ok: false, error: 'Nội dung comment rỗng' }
-  const quota = await usage(); if (!quota.ok || quota.remaining === 0) return { ok: false, quotaBlocked: true, error: quota.error || 'Đã hết hạn mức hôm nay' }
-  const r = await execute({ type: 'EXEC_POST_COMMENT', item, message: item.comment, imageBase64: item.mode === 'social' ? cfg.commentImageBase64 : '', videoKey: item.mode === 'social' ? cfg.commentVideoKey : '' }, 240000)
-  if (!r?.ok) return r
+  if (!acquirePostLock(postKey)) {
+    writeLog('info', `Đã chặn tác vụ trùng từ tab khác cho bài ${postKey}.`, targetMeta, `locked-${postKey}`, 60 * 1000)
+    return { ok: true, skipped: true, result: { skipped: 'Bài đang được tab khác xử lý' } }
+  }
+  writeLog('info', `Chuẩn bị comment vào ${targetName} · bài ${postKey}.`, targetMeta)
+  const quota = await usage()
+  if (!quota.ok || quota.remaining === 0) {
+    const error = quota.error || 'Đã hết hạn mức hôm nay'
+    writeLog('error', `Không thể comment: ${error}.`, targetMeta)
+    releasePostLock(postKey)
+    return { ok: false, quotaBlocked: true, error }
+  }
+  postingPostIds.add(postKey)
+  writeLog('info', `Đang gửi comment lên Facebook: “${clip(item.comment, 180)}”`, targetMeta)
+  let r
+  try {
+    r = await execute({ type: 'EXEC_POST_COMMENT', item, message: item.comment, imageBase64: item.mode === 'social' ? cfg.commentImageBase64 : '', videoKey: item.mode === 'social' ? cfg.commentVideoKey : '' }, 240000)
+  } finally {
+    postingPostIds.delete(postKey)
+    releasePostLock(postKey)
+  }
+  if (!r?.ok) {
+    writeLog('error', `Comment thất bại: ${r?.error || 'Facebook không trả kết quả'}.`, targetMeta)
+    return r
+  }
   queue.splice(at, 1); const history = [{ ...item, time: Date.now() }, ...(st.commentHistory || [])].slice(0, 500)
+  const commentedPostIds = [...new Set([...(st.commentedPostIds || []).map(String), postKey])].slice(-5000)
   let state = st.state || {}; const key = todayKey(); if (state.dateKey !== key) state = { ...state, dateKey: key, doneToday: 0 }
   const lo = Math.max(90, Number(st.cfg?.minDelaySec || 90)), hi = Math.max(lo, Number(st.cfg?.maxDelaySec || lo))
   state = { ...state, doneToday: Number(state.doneToday || 0) + 1, nextActionAt: Date.now() + (lo + Math.floor(Math.random() * (hi - lo + 1))) * 1000 }
-  save({ queue, commentHistory: history, state, stats: { ...(st.stats || {}), totalCommented: Number(st.stats?.totalCommented || 0) + 1, lastRunAt: Date.now(), lastError: '' } })
+  save({ queue, commentHistory: history, commentedPostIds, state, stats: { ...(st.stats || {}), totalCommented: Number(st.stats?.totalCommented || 0) + 1, lastRunAt: Date.now(), lastError: '' } })
+  const waitSec = Math.max(0, Math.ceil((state.nextActionAt - Date.now()) / 1000))
+  writeLog('success', `Đã comment thành công tại ${targetName} · lần tiếp theo sau khoảng ${waitSec} giây.`, {
+    ...targetMeta, tag: item.isPage ? 'Comment Page' : (item.mode === 'social' ? 'Comment dạo' : 'Rải link'),
+    link: r?.result?.permalink || item.permalink || targetMeta.link,
+  })
   await usage('POST', { mode: item.mode || 'comment', groupId: item.isPage ? item.pageId : item.groupId, groupName: item.isPage ? item.pageName : item.groupName, postId: item.postId, content: item.comment, link: item.link || '', permalink: item.permalink || '' })
   return { ok: true, result: r.result }
 }
@@ -113,8 +293,14 @@ function spin(text) { return String(text || '').replace(/\{([^{}]+)\}/g, (_, x) 
 async function jobTick(execute) {
   const st = load(), job = st.job
   if (!job?.running || job.paused || Date.now() < Number(job.nextAt || 0)) return { ok: true }
-  if (job.idx >= job.total) { save({ job: { ...job, running: false, finishedAt: Date.now() } }); return { ok: true } }
+  if (job.idx >= job.total) {
+    save({ job: { ...job, running: false, finishedAt: Date.now() } })
+    writeLog('success', `Chiến dịch đã hoàn tất ${job.total}/${job.total} mục.`)
+    return { ok: true }
+  }
   const i = job.idx, target = job.items[i]; let r
+  const label = job.results?.[i]?.name || String(target)
+  writeLog('info', `Chiến dịch ${job.kind}: đang xử lý ${i + 1}/${job.total} · ${label}.`)
   if (job.kind === 'comment') r = await postQueueItem(target, execute)
   else if (job.kind === 'join') r = await execute({ type: 'EXEC_JOIN_GROUP', groupId: target }, 120000)
   else {
@@ -130,12 +316,21 @@ async function jobTick(execute) {
   const lo = Math.max(20, Number(job.delayMin || 90)), hi = Math.max(lo, Number(job.delayMax || lo))
   const next = { ...job, idx: i + 1, results, consec: r?.ok ? 0 : Number(job.consec || 0) + 1, nextAt: Date.now() + (lo + Math.floor(Math.random() * (hi - lo + 1))) * 1000 }
   if (next.idx >= next.total || next.consec >= 3 || (!r?.ok && job.params?.stopOnError)) { next.running = false; next.finishedAt = Date.now() }
-  save({ job: next }); return { ok: true, result: r }
+  save({ job: next })
+  writeLog(r?.ok ? 'success' : 'error', r?.ok
+    ? `Đã xử lý thành công ${label} · tiến độ ${next.idx}/${next.total}.`
+    : `Xử lý ${label} thất bại: ${r?.error || 'không rõ lỗi'} · lỗi liên tiếp ${next.consec}/3.`)
+  if (next.running) writeLog('info', `Chiến dịch chờ ${Math.max(0, Math.ceil((next.nextAt - Date.now()) / 1000))} giây trước mục tiếp theo.`)
+  else writeLog(next.consec >= 3 ? 'error' : 'success', next.consec >= 3 ? 'Chiến dịch tự dừng vì có 3 lỗi liên tiếp.' : 'Chiến dịch đã hoàn tất.')
+  return { ok: true, result: r }
 }
 
 function migrate(legacy) {
   const current = load()
   if (current.schemaVersion) {
+    if (!current.commentedPostIds?.length && current.commentHistory?.length) {
+      return save({ commentedPostIds: [...new Set(current.commentHistory.map(x => String(x.postId)).filter(Boolean))].slice(-5000) })
+    }
     if (current.cfg && 'commentImageBase64' in current.cfg) {
       const cfg = { ...current.cfg }; delete cfg.commentImageBase64; return save({ cfg })
     }
@@ -143,6 +338,10 @@ function migrate(legacy) {
   }
   const initial = {}
   for (const key of OWNED_KEYS) if (legacy?.[key] != null) initial[key] = legacy[key]
+  initial.commentedPostIds = [...new Set([
+    ...(initial.commentHistory || []).map(x => String(x.postId)),
+    ...(legacy?.commentedPosts || []).map(x => String(x.postId ?? x)),
+  ].filter(Boolean))].slice(-5000)
   if (initial.cfg) { initial.cfg = { ...initial.cfg }; delete initial.cfg.commentImageBase64 }
   return save(initial)
 }
@@ -191,8 +390,10 @@ export async function runWebCommand(payload, execute) {
   if (type === 'TEST_AI') { const result = await ai('test', {}); return { ok: true, result } }
   if (type === 'GET_GROUPS') { const st = load(); return { ok: true, groups: st.discoveredGroups || [], syncedAt: st.groupsSyncedAt || 0 } }
   if (type === 'CLEAR_POSTED') { save({ commentHistory: [] }); return { ok: true } }
+  if (type === 'CLEAR_LOGS') { save({ logs: [] }); return { ok: true } }
+  if (type === 'SYNC_FACEBOOK_ACTIVITY') return syncFacebookActivity(execute, true)
   if (type === 'RESET_HISTORY') { save({ commentHistory: [], queue: [] }); return { ok: true } }
-  if (type === 'SCAN_NOW') return scanGroups(execute, true)
+  if (type === 'SCAN_NOW') { await syncFacebookActivity(execute); return scanGroups(execute, true) }
   if (type === 'POST_ITEM') return postQueueItem(payload.postId, execute)
   if (type === 'STEP_NOW') {
     const q = load().queue || []; if (!q.length) await scanGroups(execute, true, 1)
@@ -202,24 +403,40 @@ export async function runWebCommand(payload, execute) {
   if (type === 'START_AUTO') {
     const st = load(); if (st.job?.running) return { ok: false, error: 'Đang có chiến dịch chạy — hãy dừng trước khi bật Auto' }
     const cfg = { ...(st.cfg || {}), autoEnabled: true, killSwitch: false }
-    save({ cfg }); await execute({ type: 'EXEC_CONFIGURE_FAILOVER', autoEnabled: true, killSwitch: false })
+    save({ cfg })
+    writeLog('success', `Đã bật Auto · ${cfg.groupIds?.length || 0} nhóm mục tiêu · cap ${cfg.dailyCap || 30}/ngày · giãn cách ${cfg.minDelaySec || 90}–${cfg.maxDelaySec || 240} giây · ưu tiên bài trong ${cfg.maxPostAgeHours || 72} giờ gần nhất.`)
+    await execute({ type: 'EXEC_CONFIGURE_FAILOVER', autoEnabled: true, killSwitch: false })
     return { ok: true }
   }
   if (type === 'STOP_AUTO' || type === 'KILL') {
     const kill = type === 'KILL', st = load(), cfg = { ...(st.cfg || {}), autoEnabled: false, ...(kill ? { killSwitch: true } : {}) }
-    save({ cfg }); await execute({ type: 'EXEC_CONFIGURE_FAILOVER', autoEnabled: false, killSwitch: kill })
+    save({ cfg })
+    writeLog(kill ? 'error' : 'info', kill ? 'Đã kích hoạt DỪNG KHẨN CẤP.' : 'Đã tắt Auto theo yêu cầu.')
+    await execute({ type: 'EXEC_CONFIGURE_FAILOVER', autoEnabled: false, killSwitch: kill })
     return { ok: true }
   }
   if (type === 'AUTO_TICK') {
     const st = load(), cfg = st.cfg || {}; let state = st.state || {}, key = todayKey()
     if (!cfg.autoEnabled || cfg.killSwitch) return { ok: true, result: { skipped: 'Auto tắt' } }
     if (state.dateKey !== key) { state = { ...state, dateKey: key, doneToday: 0 }; save({ state }) }
-    if (Number(state.doneToday || 0) >= Number(cfg.dailyCap || 30)) return { ok: true, result: { skipped: 'Đạt cap ngày' } }
-    if (Date.now() < Number(state.nextActionAt || 0)) return { ok: true, result: { skipped: 'Đang chờ delay' } }
+    if (Number(state.doneToday || 0) >= Number(cfg.dailyCap || 30)) {
+      writeLog('info', `Auto tạm nghỉ: đã đạt cap ${cfg.dailyCap || 30} lượt hôm nay.`, {}, 'daily-cap', 30 * 60 * 1000)
+      return { ok: true, result: { skipped: 'Đạt cap ngày' } }
+    }
+    if (Date.now() < Number(state.nextActionAt || 0)) {
+      const sec = Math.max(1, Math.ceil((state.nextActionAt - Date.now()) / 1000))
+      writeLog('info', `Đang chờ giãn cách an toàn · còn khoảng ${sec} giây.`, {}, 'auto-wait', 60 * 1000)
+      return { ok: true, result: { skipped: 'Đang chờ delay' } }
+    }
+    await syncFacebookActivity(execute)
     if (!(load().queue || []).length) await scanGroups(execute, false, 1)
     const queue = load().queue || []
     const item = cfg.requireApproval ? queue.find(x => x.approved) : queue[0]
-    if (!item) return { ok: true, result: { skipped: queue.length ? 'Chờ duyệt' : 'Không có bài phù hợp' } }
+    if (!item) {
+      const reason = queue.length ? 'Hàng chờ đang đợi user duyệt.' : 'Chu kỳ này không tìm thấy bài phù hợp.'
+      writeLog('info', reason, {}, queue.length ? 'await-approval' : 'no-candidate', 2 * 60 * 1000)
+      return { ok: true, result: { skipped: queue.length ? 'Chờ duyệt' : 'Không có bài phù hợp' } }
+    }
     const result = await postQueueItem(item.postId, execute); return { ok: result.ok, result, error: result.error }
   }
   if (type === 'START_JOB') {
@@ -230,7 +447,12 @@ export async function runWebCommand(payload, execute) {
     const old = load().job; if (old?.running) return { ok: false, error: 'Đang có chiến dịch chạy' }
     const params = payload.params || {}, delayMin = Math.max(payload.kind === 'join' ? 20 : 90, Number(params.delayMin || 90))
     const job = { running: true, paused: false, kind: payload.kind, items, idx: 0, total: items.length, params, delayMin, delayMax: Math.max(delayMin, Number(params.delayMax || delayMin)), nextAt: 0, consec: 0, startedAt: Date.now(), results: items.map(x => ({ id: x, name: String(x), status: 'pending', error: '' })) }
-    save({ job }); setTimeout(() => { jobTick(execute).catch(error => save({ job: { ...(load().job || job), running: false, stoppedMsg: String(error?.message || error) } })) }, 0); return { ok: true, job }
+    save({ job })
+    writeLog('success', `Bắt đầu chiến dịch ${payload.kind} · ${items.length} mục · giãn cách ${delayMin}–${job.delayMax} giây.`)
+    setTimeout(() => { jobTick(execute).catch(error => {
+      writeLog('error', `Chiến dịch dừng do lỗi: ${error?.message || error}`)
+      save({ job: { ...(load().job || job), running: false, stoppedMsg: String(error?.message || error) } })
+    }) }, 0); return { ok: true, job }
   }
   if (type === 'JOB_TICK') return jobTick(execute)
   if (type === 'JOB_STOP' || type === 'JOB_PAUSE' || type === 'JOB_RESUME' || type === 'JOB_SKIP_WAIT' || type === 'JOB_CLEAR') {

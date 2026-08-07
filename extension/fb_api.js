@@ -242,17 +242,36 @@ const GROUP_FEED = {
       };
       v(o); return r;
     };
+    const deepCreatedAt = (o) => {
+      let result = 0;
+      const keys = new Set(['creation_time', 'created_time', 'publish_time', 'publish_timestamp', 'created_at']);
+      const visit = (x) => {
+        if (result || !x || typeof x !== 'object') return;
+        if (Array.isArray(x)) { for (const y of x) visit(y); return; }
+        for (const [key, value] of Object.entries(x)) {
+          if (keys.has(key)) {
+            const raw = typeof value === 'object' ? (value?.timestamp ?? value?.time) : value;
+            const n = Number(raw);
+            const ms = n > 1e12 ? n : n > 1e9 ? n * 1000 : 0;
+            if (ms > 946684800000 && ms < Date.now() + 86400000) { result = ms; return; }
+          }
+          if (value && typeof value === 'object') visit(value);
+        }
+      };
+      visit(o); return result;
+    };
     // Walk tìm node có post_id, và bắt page_info cursor
     const walk = (o) => {
       if (!o || typeof o !== 'object') return;
       if (Array.isArray(o)) { for (const x of o) walk(x); return; }
       if (typeof o.post_id === 'string' && /^\d{5,}$/.test(o.post_id)) {
         const id = o.post_id;
-        if (!byId.has(id)) byId.set(id, { postId: id, feedbackId: null, text: '', authorName: '' });
+        if (!byId.has(id)) byId.set(id, { postId: id, feedbackId: null, text: '', authorName: '', createdAt: 0 });
         const rec = byId.get(id);
         rec.feedbackId = rec.feedbackId || deepFbId(o);
         if (!rec.text) rec.text = deepText(o);
         if (!rec.authorName) rec.authorName = deepAuthor(o);
+        if (!rec.createdAt) rec.createdAt = deepCreatedAt(o);
       }
       if (o.page_info && o.page_info.has_next_page && o.page_info.end_cursor) nextCursor = o.page_info.end_cursor;
       for (const k in o) { const v = o[k]; if (v && typeof v === 'object') walk(v); }
@@ -265,6 +284,7 @@ const GROUP_FEED = {
       posts.push({
         postId: rec.postId, feedbackId: rec.feedbackId, text: rec.text,
         authorName: rec.authorName || '',
+        createdAt: rec.createdAt || 0,
         permalink: `https://www.facebook.com/groups/${groupId}/posts/${rec.postId}/`,
       });
     }
@@ -896,6 +916,50 @@ async function fbLeaveGroup(runFetch, creds, group) {
   return { ok: !!json?.data && !json?.errors, errors: json?.errors || null };
 }
 
+const ACTIVITY_LOG = {
+  FRIENDLY_NAME: 'CometActivityLogStoriesListPaginationQuery',
+  DOC_ID: '27478633398483911',
+};
+function activityText(node) {
+  return node?.feedback_context?.relevant_comments?.[0]?.body?.text
+    || node?.message?.text || node?.title?.text || node?.title || '';
+}
+function parseActivityItem(edge) {
+  const node = edge?.node || {};
+  const url = String(node.url || node.story?.url || '');
+  const postId = (url.match(/\/(?:posts|permalink)\/(\d{5,})/i) || [])[1] || '';
+  if (!postId) return null;
+  const commentId = (url.match(/[?&]comment_id=(\d{5,})/i) || [])[1] || '';
+  const groupRef = (url.match(/\/groups\/([^/?#]+)/i) || [])[1] || '';
+  const created = Number(node.creation_time || node.created_time || 0);
+  return {
+    id: String(commentId || node.post_id || postId), postId: String(postId),
+    commentId: String(commentId), groupId: /^\d+$/.test(groupRef) ? groupRef : '',
+    groupName: node.group?.name || node.story?.to?.name || groupRef,
+    mode: commentId ? 'social' : 'post', kind: commentId ? 'comment' : 'post',
+    content: activityText(node),
+    permalink: url ? new URL(url, 'https://www.facebook.com').href : '',
+    createdAt: created ? created * (created < 1e12 ? 1000 : 1) : null,
+    source: 'facebook_activity',
+  };
+}
+async function fbFetchActivityLog(runFetch, creds, cursor, count = 50) {
+  const variables = {
+    audience: null, category: 'GROUPPOSTS', category_key: 'GROUPPOSTS',
+    count: Math.min(100, Math.max(1, Number(count) || 50)), cursor: cursor || null,
+    feedLocation: null, media_content_filters: [], month: null, person_id: null,
+    privacy: 'NONE', scale: 1, timeline_visibility: 'ALL', year: null,
+    id: String(creds.uid),
+  };
+  const json = await gql(runFetch, creds, ACTIVITY_LOG.FRIENDLY_NAME, ACTIVITY_LOG.DOC_ID, variables);
+  const connection = json?.data?.node?.activity_log_stories || {};
+  const pageInfo = connection.page_info || {};
+  return {
+    items: (connection.edges || []).map(parseActivityItem).filter(Boolean),
+    nextCursor: pageInfo.end_cursor || null, hasMore: !!pageInfo.has_next_page,
+  };
+}
+
 // Apply the volatile operation ids supplied by the v1.5 web runtime. Unknown or
 // malformed values are ignored, so the bundled ids remain a safe offline fallback.
 function configureRuntime(operations) {
@@ -904,6 +968,7 @@ function configureRuntime(operations) {
     groupSearch: SEARCH, joinGroup: JOIN, createPost: POST_MUTATION,
     videoConfig: VIDEO_CFG, pageSearch: PAGE_SEARCH, pageFeed: PAGE_FEED,
     postComments: POST_COMMENTS, hideComment: HIDE_COMMENT, leaveGroup: LEAVE,
+    activityLog: ACTIVITY_LOG,
   };
   for (const [key, target] of Object.entries(targets)) {
     const value = operations?.[key];
@@ -913,4 +978,4 @@ function configureRuntime(operations) {
   }
 }
 
-self.ShopeFbApi = { fbFetchJoinedGroups, fbFetchGroupFeed, fbPostComment, fbSearchGroups, fbJoinGroup, fbCreateGroupPost, fbUploadPhoto, fbUploadVideo, fbSearchPages, fbFetchPageFeed, fbListPostComments, fbHideComment, fbLeaveGroup, configureRuntime, FB_GRAPHQL_URL, _gql: gql };
+self.ShopeFbApi = { fbFetchJoinedGroups, fbFetchGroupFeed, fbPostComment, fbSearchGroups, fbJoinGroup, fbCreateGroupPost, fbUploadPhoto, fbUploadVideo, fbSearchPages, fbFetchPageFeed, fbListPostComments, fbHideComment, fbLeaveGroup, fbFetchActivityLog, configureRuntime, FB_GRAPHQL_URL, _gql: gql };

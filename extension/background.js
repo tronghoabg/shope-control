@@ -18,6 +18,7 @@ const DEFAULTS = {
   maxDelaySec: 240,           // delay tối đa
   minScore: 60,               // ngưỡng điểm tiềm năng để comment
   postsPerScan: 5,            // số bài đọc mỗi nhóm mỗi lần quét
+  maxPostAgeHours: 72,
   groupIds: [],               // danh sách id nhóm mục tiêu
   tone: 'tự nhiên, thân thiện',
   requireApproval: true,      // true = chỉ đăng item đã được duyệt trong web app
@@ -1986,6 +1987,11 @@ async function handle(request, sendResponse) {
         const creds = await ensureCreds();
         const feed = await self.ShopeFbApi.fbFetchGroupFeed(runFetchInFbTab, creds, String(request.groupId || ''), request.cursor || null, request.count || 5);
         sendResponse({ ok: true, feed }); break;
+      }
+      case 'EXEC_FETCH_ACTIVITY_LOG': {
+        const creds = await ensureCreds();
+        const result = await self.ShopeFbApi.fbFetchActivityLog(runFetchInFbTab, creds, request.cursor || null, request.count || 50);
+        sendResponse({ ok: true, ...result }); break;
       }
       case 'EXEC_POST_COMMENT': {
         const creds = await ensureCreds();

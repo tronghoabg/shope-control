@@ -28,6 +28,11 @@ function RichLog({ log }) {
 const DOT = { success: 'bg-emerald-400', error: 'bg-red-400', info: 'bg-sky-400' }
 const TXT = { success: 'text-emerald-300', error: 'text-red-300', info: 'text-slate-300' }
 const t = (ms) => new Date(ms).toLocaleTimeString('vi')
+const LogLink = ({ log }) => log?.link ? (
+  <a href={log.link} onClick={(e) => openFb(log.link, e)} className="ml-1 inline-flex items-center gap-0.5 font-bold text-indigo-400 hover:underline">
+    <IconExternalLink size={10} /> xem bài
+  </a>
+) : null
 
 // Biến URL trong log thành link bấm được (FB → mở tab FB đang có; Shopee → tab mới).
 export function Msg({ text }) {
@@ -73,7 +78,7 @@ export function LogFeed({ max = 150, className = '' }) {
             <div className="ml-3 border-l border-slate-700 pl-2 pb-1.5">
               {b.posts.map((p, j) => p.tag
                 ? <div key={j} className="py-1"><RichLog log={p} /></div>
-                : <div key={j} className={`py-0.5 text-[11px] leading-snug ${TXT[p.level] || TXT.info}`}><Msg text={p.msg} /></div>
+                : <div key={j} className={`py-0.5 text-[11px] leading-snug ${TXT[p.level] || TXT.info}`}><Msg text={p.msg} /><LogLink log={p} /></div>
               )}
             </div>
           )}
@@ -86,7 +91,7 @@ export function LogFeed({ max = 150, className = '' }) {
             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT[b.log.level] || DOT.info}`} />
             <span className="font-mono text-[10px] text-slate-500">{t(b.log.t)}</span>
           </div>
-          <div className={`mt-0.5 break-words text-xs leading-snug ${TXT[b.log.level] || TXT.info}`}><Msg text={b.log.msg} /></div>
+          <div className={`mt-0.5 break-words text-xs leading-snug ${TXT[b.log.level] || TXT.info}`}><Msg text={b.log.msg} /><LogLink log={b.log} /></div>
         </div>
       ))}
       <div ref={endRef} />

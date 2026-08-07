@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { IconTrash, IconExternalLink, IconChecks, IconCloud, IconSearch, IconMessageCircle, IconEyeOff, IconUserSearch, IconClockHour4 } from '@tabler/icons-react'
+import { IconTrash, IconExternalLink, IconChecks, IconCloud, IconSearch, IconMessageCircle, IconEyeOff, IconUserSearch, IconClockHour4, IconRefresh } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext, openFb } from '../ext.js'
 import { Card, Btn, Badge, Empty, Input } from '../ui.jsx'
@@ -100,6 +100,7 @@ export default function Posted() {
   const [db, setDb] = useState(null)
   const [loading, setLoading] = useState(false)
   const [verifying, setVerifying] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
   // B) Bài chờ duyệt: map postId → trạng thái
   const pending = s?.pendingPosts || []
@@ -124,7 +125,9 @@ export default function Posted() {
   }, [account?.loggedIn])
 
   const fromDb = account?.loggedIn && Array.isArray(db)
-  const history = fromDb ? db : local
+  const history = [...new Map([...(db || []), ...local].map(h => [
+    `${h.kind || h.mode || ''}:${h.commentId || postIdOf(h)}:${h.time || h.createdAt || ''}`, h,
+  ])).values()].sort((a, b) => Number(b.time || b.createdAt || 0) - Number(a.time || a.createdAt || 0))
   const [q, setQ] = useState('')
   const [type, setType] = useState('all')
 
@@ -138,6 +141,13 @@ export default function Posted() {
     if (fromDb) { await fetch('/api/posted', { method: 'DELETE', credentials: 'include' }).catch(() => {}); setDb([]) }
     call({ type: 'CLEAR_POSTED' })
   }
+  const syncActivity = async () => {
+    setSyncing(true)
+    const r = await call({ type: 'SYNC_FACEBOOK_ACTIVITY' }, { timeout: 240000 })
+    setSyncing(false)
+    if (r?.ok) notify('green', `Đã đồng bộ ${r.count || 0} hoạt động trực tiếp từ Facebook`)
+    else notify('red', r?.error || 'Không đồng bộ được Activity Log')
+  }
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -149,6 +159,7 @@ export default function Posted() {
             : <Badge color="gray">Lưu cục bộ</Badge>}
         </div>
         <div className="flex items-center gap-2">
+          <Btn size="sm" icon={IconRefresh} loading={syncing} onClick={syncActivity}>Đồng bộ từ Facebook</Btn>
           {nPending > 0 && <Btn size="sm" icon={IconClockHour4} loading={verifying} onClick={verify}>Kiểm tra bài chờ duyệt ({nPending})</Btn>}
           {history.length > 0 && <Btn size="sm" icon={IconTrash} className="text-red-400 hover:bg-red-500/5 border hover:border-red-500/10" onClick={clear}>Xoá lịch sử rải</Btn>}
         </div>
