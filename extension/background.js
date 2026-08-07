@@ -491,7 +491,7 @@ async function runFetchInFbTab(url, method, body, headers) {
 }
 
 // ─── Upload Ảnh vào tab FB thật (cho comment dạo đính kèm) ──────────────
-async function runUploadInFbTab(url, fields, fileInfo) {
+async function runUploadInFbTabLegacy(url, fields, fileInfo) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const tabId = await getFbTab();
     try {
@@ -1996,9 +1996,12 @@ async function handle(request, sendResponse) {
       case 'EXEC_POST_COMMENT': {
         const creds = await ensureCreds();
         const item = { ...(request.item || {}) };
+        const configuredMedia = request.useConfiguredMedia ? (await getCfg()).cfg : {};
+        const imageBase64 = request.imageBase64 || configuredMedia.commentImageBase64 || '';
+        const videoKey = request.videoKey || configuredMedia.commentVideoKey || '';
         if (!String(request.message || '').trim() && !request.videoKey && !request.imageBase64) { sendResponse({ ok: false, error: 'Nội dung comment rỗng' }); break; }
-        if (request.videoKey) item.videoId = await getUploadedVideoIdByKey(creds, request.videoKey, 'đính kèm comment');
-        else if (request.imageBase64) item.attachmentId = await getCommentPhotoId(creds, request.imageBase64);
+        if (videoKey) item.videoId = await getUploadedVideoIdByKey(creds, videoKey, 'đính kèm comment');
+        else if (imageBase64) item.attachmentId = await getCommentPhotoId(creds, imageBase64);
         const result = await self.ShopeFbApi.fbPostComment(runFetchInFbTab, creds, item, String(request.message || ''));
         sendResponse({ ok: !!result.ok, result, error: result.ok ? '' : JSON.stringify(result.errors || 'comment_failed') }); break;
       }

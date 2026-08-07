@@ -630,13 +630,19 @@ async function fbUploadPhoto(runUpload, creds, dataUrl, name = 'photo.jpg') {
     av: creds.uid, __user: creds.uid, __a: '1', __req: (_req++).toString(36), dpr: '1',
     fb_dtsg: creds.dtsg, jazoest: computeJazoest(creds.dtsg), lsd: creds.lsd || '', __comet_req: '15',
   }).toString();
-  const url = `https://upload.facebook.com/ajax/react_composer/attachments/photo/upload?${qs}`;
-  const fields = { source: '8', profile_id: creds.uid, waterfallxapp: 'comet', upload_id: 'jsc_' + Math.floor(Math.random() * 1e9).toString(36) };
-  const raw = await runUpload(url, fields, { base64, name, mime });
-  let json; try { json = JSON.parse(String(raw).replace(/^for\s*\(\s*;\s*;\s*\)\s*;?/, '')); } catch { json = {}; }
-  const photoID = json?.payload?.photoID || json?.payload?.photo_id;
-  if (!photoID) throw new Error('Upload ảnh thất bại: ' + (json?.errorSummary || json?.error?.message || 'không nhận được ảnh từ Facebook'));
-  return String(photoID);
+  const fields = {
+    source: '8', profile_id: creds.uid, target_id: creds.uid, waterfallxapp: 'comet',
+    upload_id: 'jsc_' + Math.floor(Math.random() * 1e9).toString(36),
+  };
+  let lastError = 'không nhận được ảnh từ Facebook';
+  for (const host of ['https://upload.facebook.com', 'https://www.facebook.com']) {
+    const raw = await runUpload(`${host}/ajax/react_composer/attachments/photo/upload?${qs}`, fields, { base64, name, mime });
+    let json; try { json = JSON.parse(String(raw).replace(/^for\s*\(\s*;\s*;\s*\)\s*;?/, '')); } catch { json = {}; }
+    const photoID = json?.payload?.photoID || json?.payload?.photo_id;
+    if (photoID) return String(photoID);
+    lastError = [json?.errorSummary, json?.errorDescription, json?.error?.message, json?.error ? `mã ${json.error}` : ''].filter(Boolean).join(' · ') || String(raw).slice(0, 180);
+  }
+  throw new Error('Upload ảnh thất bại: ' + lastError);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

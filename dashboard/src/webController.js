@@ -5,7 +5,7 @@ const OWNED_KEYS = [
   'cfg', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'searchResults', 'searchAt',
   'searchCursors', 'searchKeywords', 'searchHasMore', 'targetPages', 'pageSearchResults',
   'pageSearchCursors', 'pageSearchKeywords', 'pageHasMore', 'savedGroupLists',
-  'savedPageLists', 'savedPosts', 'queue', 'commentHistory', 'commentedPostIds', 'activitySyncedAt', 'activitySyncStats', 'state', 'stats', 'job', 'logs',
+  'savedPageLists', 'savedPosts', 'queue', 'commentHistory', 'commentedPostIds', 'activitySyncedAt', 'activitySyncRetryAt', 'activitySyncStats', 'state', 'stats', 'job', 'logs',
 ]
 
 function load() {
@@ -233,6 +233,7 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity) {
 async function syncFacebookActivity(execute, force = false) {
   const before = load()
   if (!force && Date.now() - Number(before.activitySyncedAt || 0) < 10 * 60 * 1000) return { ok: true, skipped: true, count: 0 }
+  if (!force && Date.now() < Number(before.activitySyncRetryAt || 0)) return { ok: true, skipped: true, count: 0 }
   writeLog('info', 'Đang đồng bộ Lịch sử hoạt động trực tiếp từ Facebook…', {}, 'activity-sync', 60 * 1000)
   let items = [], pagesFetched = 0, successfulCategories = 0, categoryErrors = []
   try {
@@ -254,17 +255,22 @@ async function syncFacebookActivity(execute, force = false) {
     if (!successfulCategories) throw new Error(categoryErrors.join(' · '))
     items = [...new Map(items.map(x => [`${x.kind}:${x.commentId || x.postId}`, x])).values()]
   } catch (error) {
+    const errorText = String(error?.message || error)
+    const incompatible = /khởi động lại trình duyệt|restart.*browser|unknown action|không hỗ trợ/i.test(errorText)
+    const retryAt = Date.now() + (incompatible ? 6 * 60 * 60 * 1000 : 10 * 60 * 1000)
     const server = await pullServerActivity()
     if (server?.commentedPostIds?.length) {
       const current = load()
       save({
         commentHistory: server.items || current.commentHistory || [],
         commentedPostIds: [...new Set([...(current.commentedPostIds || []).map(String), ...server.commentedPostIds.map(String)])].slice(-10000),
-        activitySyncedAt: Number(server.lastSyncedAt || current.activitySyncedAt || 0),
+        activitySyncedAt: Number(server.lastSyncedAt || current.activitySyncedAt || 0), activitySyncRetryAt: retryAt,
       })
-    }
-    writeLog('error', `Không đồng bộ được Activity Log: ${error?.message || error}. Auto tiếp tục dùng dữ liệu chống trùng đã lưu.`, {}, 'activity-error', 10 * 60 * 1000)
-    return { ok: false, error: String(error?.message || error) }
+    } else save({ activitySyncRetryAt: retryAt })
+    writeLog(incompatible ? 'info' : 'error', incompatible
+      ? 'Extension đang dùng chưa hỗ trợ Activity Log mới. Auto tiếp tục bằng dữ liệu chống trùng đã lưu; hãy reload extension v1.5 khi thuận tiện.'
+      : `Không đồng bộ được Activity Log: ${errorText}. Auto tiếp tục dùng dữ liệu chống trùng đã lưu.`, {}, 'activity-error', incompatible ? 6 * 60 * 60 * 1000 : 10 * 60 * 1000)
+    return { ok: false, error: errorText }
   }
   if (categoryErrors.length) writeLog('info', `Một phần Activity Log chưa đọc được (${categoryErrors.join(' · ')}); dữ liệu đọc thành công vẫn được lưu.`, {}, 'activity-partial', 10 * 60 * 1000)
   const current = load(), oldHistory = current.commentHistory || []
@@ -288,7 +294,7 @@ async function syncFacebookActivity(execute, force = false) {
       }
     } catch {}
   }
-  save({ commentHistory: history, commentedPostIds, activitySyncedAt: Date.now(), activitySyncStats: { at: Date.now(), received: items.length, pages: pagesFetched, ...(serverStats || {}) } })
+  save({ commentHistory: history, commentedPostIds, activitySyncedAt: Date.now(), activitySyncRetryAt: 0, activitySyncStats: { at: Date.now(), received: items.length, pages: pagesFetched, ...(serverStats || {}) } })
   writeLog('success', `Đã đọc ${pagesFetched} trang / ${items.length} hoạt động từ Facebook${serverStats ? ` · server thêm ${serverStats.added}, cập nhật ${serverStats.updated}` : ''} · nhận diện ${commentedPostIds.length} bài cần chống trùng.`)
   return { ok: true, count: items.length, pages: pagesFetched, items, stats: serverStats }
 }
@@ -343,7 +349,12 @@ async function postQueueItem(postId, execute) {
   writeLog('info', `Đang gửi comment lên Facebook: “${clip(item.comment, 180)}”`, targetMeta)
   let r
   try {
-    r = await execute({ type: 'EXEC_POST_COMMENT', item, message: item.comment, imageBase64: item.mode === 'social' ? cfg.commentImageBase64 : '', videoKey: item.mode === 'social' ? cfg.commentVideoKey : '' }, 240000)
+    r = await execute({ type: 'EXEC_POST_COMMENT', item, message: item.comment, useConfiguredMedia: item.mode === 'social' }, 240000)
+    const mediaAttached = item.mode === 'social' && (cfg.commentImageBase64 || cfg.commentVideoKey)
+    if (!r?.ok && mediaAttached && /upload|ảnh|photo|video/i.test(String(r?.error || ''))) {
+      writeLog('info', 'Facebook từ chối media đính kèm; đang thử lại một lần bằng comment chữ để không bỏ lỡ bài.', targetMeta)
+      r = await execute({ type: 'EXEC_POST_COMMENT', item, message: item.comment, imageBase64: '', videoKey: '' }, 240000)
+    }
   } catch (error) {
     r = { ok: false, error: String(error?.message || error) }
   } finally {
@@ -353,13 +364,18 @@ async function postQueueItem(postId, execute) {
   if (!r?.ok) {
     await serverLock(serverTargetKey, false)
     writeLog('error', `Comment thất bại: ${r?.error || 'Facebook không trả kết quả'}.`, targetMeta)
+    const current = load(), currentState = current.state || {}
+    const failures = Math.min(6, Number(currentState.consecutivePostErrors || 0) + 1)
+    const backoffSec = Math.min(30 * 60, 60 * (2 ** (failures - 1)))
+    save({ state: { ...currentState, consecutivePostErrors: failures, nextActionAt: Date.now() + backoffSec * 1000 }, stats: { ...(current.stats || {}), lastError: r?.error || 'Comment thất bại' } })
+    writeLog('info', `Tạm chờ ${Math.ceil(backoffSec / 60)} phút trước khi thử tác vụ tiếp theo để tránh lặp lỗi Facebook.`, targetMeta, `post-backoff-${postKey}`, backoffSec * 1000)
     return r
   }
   queue.splice(at, 1); const history = [{ ...item, time: Date.now() }, ...(st.commentHistory || [])].slice(0, 500)
   const commentedPostIds = [...new Set([...(st.commentedPostIds || []).map(String), postKey])].slice(-5000)
   let state = st.state || {}; const key = todayKey(); if (state.dateKey !== key) state = { ...state, dateKey: key, doneToday: 0 }
   const lo = Math.max(90, Number(st.cfg?.minDelaySec || 90)), hi = Math.max(lo, Number(st.cfg?.maxDelaySec || lo))
-  state = { ...state, doneToday: Number(state.doneToday || 0) + 1, nextActionAt: Date.now() + (lo + Math.floor(Math.random() * (hi - lo + 1))) * 1000 }
+  state = { ...state, doneToday: Number(state.doneToday || 0) + 1, consecutivePostErrors: 0, nextActionAt: Date.now() + (lo + Math.floor(Math.random() * (hi - lo + 1))) * 1000 }
   save({ queue, commentHistory: history, commentedPostIds, state, stats: { ...(st.stats || {}), totalCommented: Number(st.stats?.totalCommented || 0) + 1, lastRunAt: Date.now(), lastError: '' } })
   const waitSec = Math.max(0, Math.ceil((state.nextActionAt - Date.now()) / 1000))
   writeLog('success', `Đã comment thành công tại ${targetName} · lần tiếp theo sau khoảng ${waitSec} giây.`, {
