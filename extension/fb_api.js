@@ -927,7 +927,11 @@ function activityText(node) {
 function parseActivityItem(edge) {
   const node = edge?.node || {};
   const url = String(node.url || node.story?.url || '');
-  const postId = (url.match(/\/(?:posts|permalink)\/(\d{5,})/i) || [])[1] || '';
+  let decodedStoryId = '';
+  try { decodedStoryId = atob(String(node.attached_story?.id || '')).replace(/\0/g, ''); } catch {}
+  const postId = (url.match(/\/(?:posts|permalink)\/(\d{5,})/i) || [])[1]
+    || (url.match(/[?&]story_fbid=(\d{5,})/i) || [])[1]
+    || (decodedStoryId.match(/(\d{5,})\s*$/) || [])[1] || '';
   if (!postId) return null;
   const commentId = (url.match(/[?&]comment_id=(\d{5,})/i) || [])[1] || '';
   const groupRef = (url.match(/\/groups\/([^/?#]+)/i) || [])[1] || '';
@@ -943,9 +947,10 @@ function parseActivityItem(edge) {
     source: 'facebook_activity',
   };
 }
-async function fbFetchActivityLog(runFetch, creds, cursor, count = 50) {
+async function fbFetchActivityLog(runFetch, creds, cursor, count = 50, category = 'GROUPPOSTS') {
+  const safeCategory = ['GROUPPOSTS', 'COMMENTS'].includes(category) ? category : 'GROUPPOSTS';
   const variables = {
-    audience: null, category: 'GROUPPOSTS', category_key: 'GROUPPOSTS',
+    audience: null, category: safeCategory, category_key: safeCategory,
     count: Math.min(100, Math.max(1, Number(count) || 50)), cursor: cursor || null,
     feedLocation: null, media_content_filters: [], month: null, person_id: null,
     privacy: 'NONE', scale: 1, timeline_visibility: 'ALL', year: null,

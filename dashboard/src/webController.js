@@ -5,7 +5,7 @@ const OWNED_KEYS = [
   'cfg', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'searchResults', 'searchAt',
   'searchCursors', 'searchKeywords', 'searchHasMore', 'targetPages', 'pageSearchResults',
   'pageSearchCursors', 'pageSearchKeywords', 'pageHasMore', 'savedGroupLists',
-  'savedPageLists', 'savedPosts', 'queue', 'commentHistory', 'commentedPostIds', 'activitySyncedAt', 'state', 'stats', 'job', 'logs',
+  'savedPageLists', 'savedPosts', 'queue', 'commentHistory', 'commentedPostIds', 'activitySyncedAt', 'activitySyncStats', 'state', 'stats', 'job', 'logs',
 ]
 
 function load() {
@@ -57,6 +57,46 @@ function groupInfo(st, groupId) {
     groupName: group?.name || `Nhóm ${groupId}`,
     groupUrl: group?.url || `https://www.facebook.com/groups/${groupId}`,
   }
+}
+function apiBase() {
+  const cfg = load().cfg || {}
+  return (cfg.webBase || location.origin).replace(/\/$/, '')
+}
+function authHeaders(json = false) {
+  const token = load().cfg?.licenseToken || ''
+  return { ...(json ? { 'content-type': 'application/json' } : {}), ...(token ? { authorization: 'Bearer ' + token } : {}) }
+}
+function fingerprint(value) {
+  let h = 2166136261
+  for (const ch of String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) }
+  return (h >>> 0).toString(36)
+}
+async function serverLock(targetKey, acquire) {
+  if (!load().cfg?.licenseToken) return { ok: true, offline: true }
+  try {
+    const r = await fetch(apiBase() + '/api/automation-lock', {
+      method: acquire ? 'POST' : 'DELETE', headers: authHeaders(true),
+      body: JSON.stringify({ targetKey, owner: controllerInstanceId, ttlMs: 15 * 60 * 1000 }),
+    })
+    const data = await r.json().catch(() => ({}))
+    return { ok: r.ok, status: r.status, ...data }
+  } catch { return { ok: true, offline: true } }
+}
+async function serverComplete(targetKey, posted) {
+  if (!load().cfg?.licenseToken) return
+  try {
+    await fetch(apiBase() + '/api/automation-lock', {
+      method: 'PATCH', headers: authHeaders(true), body: JSON.stringify({ targetKey, ...(posted || {}) }),
+    })
+  } catch {}
+}
+async function pullServerActivity() {
+  if (!load().cfg?.licenseToken) return null
+  try {
+    const r = await fetch(apiBase() + '/api/activity', { headers: authHeaders() })
+    if (!r.ok) return null
+    return await r.json()
+  } catch { return null }
 }
 
 function todayKey() { const d = new Date(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}` }
@@ -194,19 +234,39 @@ async function syncFacebookActivity(execute, force = false) {
   const before = load()
   if (!force && Date.now() - Number(before.activitySyncedAt || 0) < 10 * 60 * 1000) return { ok: true, skipped: true, count: 0 }
   writeLog('info', 'Đang đồng bộ Lịch sử hoạt động trực tiếp từ Facebook…', {}, 'activity-sync', 60 * 1000)
-  let cursor = null, items = []
+  let items = [], pagesFetched = 0, successfulCategories = 0, categoryErrors = []
   try {
-    for (let page = 0; page < 4; page++) {
-      const r = await execute({ type: 'EXEC_FETCH_ACTIVITY_LOG', cursor, count: 50 }, 120000)
-      if (!r?.ok) throw new Error(r?.error || 'Facebook không trả Activity Log')
-      items.push(...(r.items || []))
-      cursor = r.nextCursor || null
-      if (!r.hasMore || !cursor) break
+    for (const category of ['GROUPPOSTS', 'COMMENTS']) {
+      let cursor = null
+      try {
+        for (let page = 0; page < (force ? 6 : 2); page++) {
+          const r = await execute({ type: 'EXEC_FETCH_ACTIVITY_LOG', category, cursor, count: 50 }, 120000)
+          if (!r?.ok) throw new Error(r?.error || `Facebook không trả Activity Log (${category})`)
+          items.push(...(r.items || [])); pagesFetched++
+          cursor = r.nextCursor || null
+          if (!r.hasMore || !cursor) break
+        }
+        successfulCategories++
+      } catch (error) {
+        categoryErrors.push(`${category}: ${error?.message || error}`)
+      }
     }
+    if (!successfulCategories) throw new Error(categoryErrors.join(' · '))
+    items = [...new Map(items.map(x => [`${x.kind}:${x.commentId || x.postId}`, x])).values()]
   } catch (error) {
+    const server = await pullServerActivity()
+    if (server?.commentedPostIds?.length) {
+      const current = load()
+      save({
+        commentHistory: server.items || current.commentHistory || [],
+        commentedPostIds: [...new Set([...(current.commentedPostIds || []).map(String), ...server.commentedPostIds.map(String)])].slice(-10000),
+        activitySyncedAt: Number(server.lastSyncedAt || current.activitySyncedAt || 0),
+      })
+    }
     writeLog('error', `Không đồng bộ được Activity Log: ${error?.message || error}. Auto tiếp tục dùng dữ liệu chống trùng đã lưu.`, {}, 'activity-error', 10 * 60 * 1000)
     return { ok: false, error: String(error?.message || error) }
   }
+  if (categoryErrors.length) writeLog('info', `Một phần Activity Log chưa đọc được (${categoryErrors.join(' · ')}); dữ liệu đọc thành công vẫn được lưu.`, {}, 'activity-partial', 10 * 60 * 1000)
   const current = load(), oldHistory = current.commentHistory || []
   const byKey = new Map(oldHistory.map(x => [`${x.kind || x.mode || ''}:${x.commentId || x.postId}:${x.time || x.createdAt || ''}`, x]))
   for (const item of items) {
@@ -214,13 +274,23 @@ async function syncFacebookActivity(execute, force = false) {
     byKey.set(`${item.kind || item.mode}:${item.commentId || item.postId}:${normalized.time}`, normalized)
   }
   const history = [...byKey.values()].sort((a, b) => Number(b.time || b.createdAt || 0) - Number(a.time || a.createdAt || 0)).slice(0, 1000)
-  const commentedPostIds = [...new Set([
+  let commentedPostIds = [...new Set([
     ...(current.commentedPostIds || []).map(String),
     ...items.filter(x => x.kind === 'comment').map(x => String(x.postId)).filter(Boolean),
   ])].slice(-5000)
-  save({ commentHistory: history, commentedPostIds, activitySyncedAt: Date.now() })
-  writeLog('success', `Đã đồng bộ ${items.length} hoạt động từ Facebook · nhận diện ${commentedPostIds.length} bài cần chống trùng.`)
-  return { ok: true, count: items.length, items }
+  let serverStats = null
+  if (current.cfg?.licenseToken) {
+    try {
+      const response = await fetch(apiBase() + '/api/activity', { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ items }) })
+      if (response.ok) {
+        serverStats = await response.json()
+        commentedPostIds = [...new Set([...commentedPostIds, ...(serverStats.commentedPostIds || []).map(String)])].slice(-10000)
+      }
+    } catch {}
+  }
+  save({ commentHistory: history, commentedPostIds, activitySyncedAt: Date.now(), activitySyncStats: { at: Date.now(), received: items.length, pages: pagesFetched, ...(serverStats || {}) } })
+  writeLog('success', `Đã đọc ${pagesFetched} trang / ${items.length} hoạt động từ Facebook${serverStats ? ` · server thêm ${serverStats.added}, cập nhật ${serverStats.updated}` : ''} · nhận diện ${commentedPostIds.length} bài cần chống trùng.`)
+  return { ok: true, count: items.length, pages: pagesFetched, items, stats: serverStats }
 }
 
 async function postQueueItem(postId, execute) {
@@ -253,12 +323,20 @@ async function postQueueItem(postId, execute) {
     writeLog('info', `Đã chặn tác vụ trùng từ tab khác cho bài ${postKey}.`, targetMeta, `locked-${postKey}`, 60 * 1000)
     return { ok: true, skipped: true, result: { skipped: 'Bài đang được tab khác xử lý' } }
   }
+  const serverTargetKey = `comment:${postKey}`
+  const remoteLock = await serverLock(serverTargetKey, true)
+  if (!remoteLock.ok) {
+    releasePostLock(postKey)
+    writeLog('info', `Đã chặn đăng trùng đa máy cho bài ${postKey}: ${remoteLock.reason === 'already_completed' ? 'đã hoàn thành trước đó' : 'máy khác đang xử lý'}.`, targetMeta)
+    return { ok: true, skipped: true, result: { skipped: 'Đã xử lý hoặc đang chạy trên máy khác' } }
+  }
   writeLog('info', `Chuẩn bị comment vào ${targetName} · bài ${postKey}.`, targetMeta)
   const quota = await usage()
   if (!quota.ok || quota.remaining === 0) {
     const error = quota.error || 'Đã hết hạn mức hôm nay'
     writeLog('error', `Không thể comment: ${error}.`, targetMeta)
     releasePostLock(postKey)
+    await serverLock(serverTargetKey, false)
     return { ok: false, quotaBlocked: true, error }
   }
   postingPostIds.add(postKey)
@@ -266,11 +344,14 @@ async function postQueueItem(postId, execute) {
   let r
   try {
     r = await execute({ type: 'EXEC_POST_COMMENT', item, message: item.comment, imageBase64: item.mode === 'social' ? cfg.commentImageBase64 : '', videoKey: item.mode === 'social' ? cfg.commentVideoKey : '' }, 240000)
+  } catch (error) {
+    r = { ok: false, error: String(error?.message || error) }
   } finally {
     postingPostIds.delete(postKey)
     releasePostLock(postKey)
   }
   if (!r?.ok) {
+    await serverLock(serverTargetKey, false)
     writeLog('error', `Comment thất bại: ${r?.error || 'Facebook không trả kết quả'}.`, targetMeta)
     return r
   }
@@ -285,7 +366,8 @@ async function postQueueItem(postId, execute) {
     ...targetMeta, tag: item.isPage ? 'Comment Page' : (item.mode === 'social' ? 'Comment dạo' : 'Rải link'),
     link: r?.result?.permalink || item.permalink || targetMeta.link,
   })
-  await usage('POST', { mode: item.mode || 'comment', groupId: item.isPage ? item.pageId : item.groupId, groupName: item.isPage ? item.pageName : item.groupName, postId: item.postId, content: item.comment, link: item.link || '', permalink: item.permalink || '' })
+  await usage('POST', { mode: item.mode || 'comment', groupId: item.isPage ? item.pageId : item.groupId, groupName: item.isPage ? item.pageName : item.groupName, postId: item.postId, content: item.comment, link: item.link || '', permalink: item.permalink || '', sourceKey: `tool:comment:${item.postId}`, fingerprint: serverTargetKey })
+  await serverLock(serverTargetKey, false)
   return { ok: true, result: r.result }
 }
 
@@ -298,7 +380,7 @@ async function jobTick(execute) {
     writeLog('success', `Chiến dịch đã hoàn tất ${job.total}/${job.total} mục.`)
     return { ok: true }
   }
-  const i = job.idx, target = job.items[i]; let r
+  const i = job.idx, target = job.items[i]; let r, postFingerprint = ''
   const label = job.results?.[i]?.name || String(target)
   writeLog('info', `Chiến dịch ${job.kind}: đang xử lý ${i + 1}/${job.total} · ${label}.`)
   if (job.kind === 'comment') r = await postQueueItem(target, execute)
@@ -306,11 +388,27 @@ async function jobTick(execute) {
   else {
     const p = job.params || {}, variants = p.variants?.length ? p.variants : [p.content || '']; let message = spin(variants[i % variants.length])
     if (p.useAi && message) message = await ai('rewrite', { text: message })
-    // Media upload still requires the extension media executor; reuse POST_GROUP
-    // only for that exceptional path until upload ids are prepared by web.
-    r = (p.images?.length || p.videoKey)
-      ? await execute({ type: 'POST_GROUP', groupId: target, message, link: p.link, images: p.images, videoKey: p.videoKey, bgPresetId: p.bgPresetId }, 240000)
-      : await execute({ type: 'EXEC_CREATE_GROUP_POST', groupId: target, message, link: p.link, bgPresetId: p.bgPresetId }, 120000)
+    postFingerprint = `post:${target}:${fingerprint(message + '|' + (p.link || ''))}`
+    const lock = await serverLock(postFingerprint, true)
+    if (!lock.ok) {
+      r = { ok: true, skipped: true, error: '', result: { skipped: lock.reason === 'already_completed' ? 'Đã đăng nội dung này vào nhóm' : 'Máy khác đang đăng nội dung này' } }
+      writeLog('info', `Chặn đăng bài trùng tại ${label}: ${r.result.skipped}.`)
+    } else {
+      try {
+        // Media upload still requires the extension media executor.
+        r = (p.images?.length || p.videoKey)
+          ? await execute({ type: 'POST_GROUP', groupId: target, message, link: p.link, images: p.images, videoKey: p.videoKey, bgPresetId: p.bgPresetId }, 240000)
+          : await execute({ type: 'EXEC_CREATE_GROUP_POST', groupId: target, message, link: p.link, bgPresetId: p.bgPresetId }, 120000)
+        if (r?.ok && !r?.skipped && !(p.images?.length || p.videoKey)) {
+          await usage('POST', { mode: 'post', groupId: target, groupName: label, postId: r?.result?.postId || '', content: message, link: p.link || '', permalink: r?.postUrl || r?.result?.postUrl || '', sourceKey: `tool:${postFingerprint}`, fingerprint: postFingerprint })
+        }
+        if (r?.ok && !r?.skipped) await serverComplete(postFingerprint, { groupId: target, groupName: label, content: message, permalink: r?.postUrl || r?.result?.postUrl || '' })
+      } catch (error) {
+        r = { ok: false, error: String(error?.message || error) }
+      } finally {
+        await serverLock(postFingerprint, false)
+      }
+    }
   }
   const results = job.results.map((x, n) => n === i ? { ...x, status: r?.ok ? 'success' : 'error', error: r?.error || '', url: r?.postUrl || r?.result?.postUrl || x.url } : x)
   const lo = Math.max(20, Number(job.delayMin || 90)), hi = Math.max(lo, Number(job.delayMax || lo))

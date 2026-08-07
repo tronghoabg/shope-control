@@ -106,6 +106,7 @@ export default function Posted() {
   const pending = s?.pendingPosts || []
   const pendMap = Object.fromEntries(pending.map(p => [p.postId, p.status]))
   const nPending = pending.filter(p => p.status === 'pending').length
+  const syncStats = s?.activitySyncStats
   const verify = async () => {
     setVerifying(true)
     const r = await ext({ type: 'VERIFY_PENDING', max: 15 }, 150000)
@@ -157,6 +158,7 @@ export default function Posted() {
           {fromDb
             ? <Badge color="green"><IconCloud size={13} className="inline mr-1" /> Đồng bộ server</Badge>
             : <Badge color="gray">Lưu cục bộ</Badge>}
+          {syncStats?.at && <Badge color="indigo">Facebook: {new Date(syncStats.at).toLocaleString('vi')}</Badge>}
         </div>
         <div className="flex items-center gap-2">
           <Btn size="sm" icon={IconRefresh} loading={syncing} onClick={syncActivity}>Đồng bộ từ Facebook</Btn>
@@ -164,6 +166,13 @@ export default function Posted() {
           {history.length > 0 && <Btn size="sm" icon={IconTrash} className="text-red-400 hover:bg-red-500/5 border hover:border-red-500/10" onClick={clear}>Xoá lịch sử rải</Btn>}
         </div>
       </div>
+
+      {syncStats?.at && (
+        <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 px-4 py-3 text-xs text-slate-400">
+          Lần đồng bộ gần nhất đã đọc <b className="text-slate-200">{syncStats.pages || 0} trang</b> · nhận <b className="text-slate-200">{syncStats.received || 0} hoạt động</b>
+          {syncStats.added != null && <> · server thêm <b className="text-emerald-300">{syncStats.added}</b>, cập nhật <b className="text-indigo-300">{syncStats.updated || 0}</b>, bỏ qua <b>{syncStats.ignored || 0}</b></>}.
+        </div>
+      )}
 
       <Card className="p-0 overflow-hidden">
         <div className="border-b border-slate-850 px-5 py-3.5 bg-slate-900/20 flex flex-wrap items-center justify-between gap-3">

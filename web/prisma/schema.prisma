@@ -21,29 +21,48 @@ model User {
   aiTokensTotal Int       @default(0) // tổng token ước lượng đã tiêu
   bannedAt      DateTime? // chặn dùng AI hệ thống khi nghi lạm dụng (null = bình thường)
 
-  accounts      Account[]
-  sessions      Session[]
-  subscription  Subscription?
-  payments      Payment[]
-  usage         DailyUsage[]
-  posted        PostedComment[]
+  accounts        Account[]
+  sessions        Session[]
+  subscription    Subscription?
+  payments        Payment[]
+  usage           DailyUsage[]
+  posted          PostedComment[]
+  automationLocks AutomationLock[]
 }
 
 // ── Lịch sử đã đăng (comment/bài) — bền qua đổi máy/xoá cache, admin xem được ──
 model PostedComment {
+  id          String   @id @default(cuid())
+  userId      String
+  mode        String   @default("comment") // comment | post
+  groupId     String?
+  groupName   String?
+  postId      String?
+  content     String   @db.Text
+  link        String?
+  permalink   String?
+  createdAt   DateTime @default(now())
+  source      String   @default("toolmkt")
+  sourceKey   String?
+  fingerprint String?
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sourceKey])
+  @@index([userId, createdAt])
+  @@index([userId, fingerprint])
+}
+
+model AutomationLock {
   id        String   @id @default(cuid())
   userId    String
-  mode      String   @default("comment") // comment | post
-  groupId   String?
-  groupName String?
-  postId    String?
-  content   String   @db.Text
-  link      String?
-  permalink String?
+  targetKey String
+  owner     String
+  expiresAt DateTime
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, createdAt])
+  @@unique([userId, targetKey])
+  @@index([expiresAt])
 }
 
 // ── Quota theo ngày (free 10 comment/ngày) ──
@@ -68,28 +87,28 @@ model Setting {
 
 // ── Gói đăng ký ──
 model Subscription {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  plan      String   @default("free") // free | m1 | m6 | m12
-  status    String   @default("active") // active | expired
+  id        String    @id @default(cuid())
+  userId    String    @unique
+  plan      String    @default("free") // free | m1 | m6 | m12
+  status    String    @default("active") // active | expired
   expiresAt DateTime? // null = free (không hết hạn)
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // ── Thanh toán qua SePay ──
 model Payment {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
   plan      String // m1 | m6 | m12
   amount    Int // VND
-  code      String   @unique // nội dung CK để khớp (vd SHOPE<random>)
-  status    String   @default("pending") // pending | paid | failed
-  provider  String   @default("sepay")
+  code      String    @unique // nội dung CK để khớp (vd SHOPE<random>)
+  status    String    @default("pending") // pending | paid | failed
+  provider  String    @default("sepay")
   ref       String? // mã giao dịch SePay khi đã trả
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
   paidAt    DateTime?
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // ── NextAuth (Auth.js) ──

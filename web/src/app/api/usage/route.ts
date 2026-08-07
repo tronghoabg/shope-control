@@ -34,6 +34,8 @@ export async function POST(req: Request) {
             groupId: p.groupId ? String(p.groupId) : null, groupName: p.groupName ? String(p.groupName).slice(0, 200) : null,
             postId: p.postId ? String(p.postId) : null, content: String(p.content || '').slice(0, 2000),
             link: p.link ? String(p.link).slice(0, 1000) : null, permalink: p.permalink ? String(p.permalink).slice(0, 1000) : null,
+            source: 'toolmkt', sourceKey: p.sourceKey ? String(p.sourceKey).slice(0, 200) : null,
+            fingerprint: p.fingerprint ? String(p.fingerprint).slice(0, 300) : null,
           },
         })
       } catch { /* không chặn quota nếu ghi lịch sử lỗi */ }

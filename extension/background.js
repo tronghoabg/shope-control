@@ -1990,7 +1990,7 @@ async function handle(request, sendResponse) {
       }
       case 'EXEC_FETCH_ACTIVITY_LOG': {
         const creds = await ensureCreds();
-        const result = await self.ShopeFbApi.fbFetchActivityLog(runFetchInFbTab, creds, request.cursor || null, request.count || 50);
+        const result = await self.ShopeFbApi.fbFetchActivityLog(runFetchInFbTab, creds, request.cursor || null, request.count || 50, request.category || 'GROUPPOSTS');
         sendResponse({ ok: true, ...result }); break;
       }
       case 'EXEC_POST_COMMENT': {
