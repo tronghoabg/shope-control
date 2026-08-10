@@ -358,14 +358,18 @@ async function postQueueItem(postId, execute) {
     const backoffSec = Math.min(30 * 60, 60 * (2 ** (failures - 1)))
     save({
       ...(invalidTarget ? { queue: (current.queue || []).filter(x => String(x.postId) !== postKey) } : {}),
-      state: { ...currentState, consecutivePostErrors: failures, nextActionAt: Date.now() + backoffSec * 1000 },
+      state: { ...currentState, consecutivePostErrors: failures, nextActionAt: invalidTarget ? 0 : Date.now() + backoffSec * 1000 },
       stats: { ...(current.stats || {}), lastError: errorText },
     })
     setProgress('waiting', invalidTarget
       ? `Đã loại bài không truy cập được; chuẩn bị chuyển sang bài khác.`
       : `Facebook báo lỗi; sẽ thử tác vụ tiếp theo sau ${Math.ceil(backoffSec / 60)} phút.`)
-    if (invalidTarget) writeLog('info', 'Đã loại bài không hợp lệ khỏi hàng chờ; Auto sẽ chuyển sang bài khác.', targetMeta)
-    writeLog('info', `Tạm chờ ${Math.ceil(backoffSec / 60)} phút trước khi thử tác vụ tiếp theo để tránh lặp lỗi Facebook.`, targetMeta, `post-backoff-${postKey}`, backoffSec * 1000)
+    if (invalidTarget) {
+      writeLog('info', 'Đã loại bài không hợp lệ khỏi hàng chờ; đang chuyển ngay sang bài khác.', targetMeta)
+      setTimeout(() => runWebCommand({ type: 'AUTO_TICK' }, execute).catch(() => {}), 300)
+    } else {
+      writeLog('info', `Tạm chờ ${Math.ceil(backoffSec / 60)} phút trước khi thử tác vụ tiếp theo để tránh lặp lỗi Facebook.`, targetMeta, `post-backoff-${postKey}`, backoffSec * 1000)
+    }
     return r
   }
   queue.splice(at, 1); const history = [{ ...item, time: Date.now() }, ...(st.commentHistory || [])].slice(0, 500)
@@ -517,7 +521,7 @@ export async function runWebCommand(payload, execute) {
     const cfg = { ...(st.cfg || {}), autoEnabled: true, killSwitch: false }
     const state = { ...(st.state || {}), nextActionAt: 0, consecutivePostErrors: 0 }
     localStorage.removeItem(POST_LOCK_KEY)
-    save({ cfg, state, progress: { active: true, phase: 'startup', label: 'Đang khởi động Auto và chuẩn bị tìm bài mới…', current: 0, total: 0, updatedAt: Date.now() } })
+    save({ cfg, state, queue: [], progress: { active: true, phase: 'startup', label: 'Đang khởi động Auto, bỏ hàng chờ cũ và tìm bài mới…', current: 0, total: 0, updatedAt: Date.now() } })
     writeLog('success', `Đã bật Auto · ${cfg.groupIds?.length || 0} nhóm mục tiêu · cap ${cfg.dailyCap || 30}/ngày · giãn cách ${cfg.minDelaySec || 90}–${cfg.maxDelaySec || 240} giây · ưu tiên bài trong ${cfg.maxPostAgeHours || 72} giờ gần nhất.`)
     await execute({ type: 'EXEC_CONFIGURE_FAILOVER', autoEnabled: true, killSwitch: false })
     setTimeout(() => runWebCommand({ type: 'AUTO_TICK' }, execute).catch(error => writeLog('error', `Auto không khởi chạy được: ${error?.message || error}`)), 0)
