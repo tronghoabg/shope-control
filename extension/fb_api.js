@@ -260,15 +260,42 @@ const GROUP_FEED = {
       };
       visit(o); return result;
     };
+    const deepPermalink = (o) => {
+      let result = '';
+      const visit = (x) => {
+        if (result || !x || typeof x !== 'object') return;
+        if (Array.isArray(x)) { for (const y of x) visit(y); return; }
+        for (const [key, value] of Object.entries(x)) {
+          if (typeof value === 'string' && /url|permalink/i.test(key)
+            && /facebook\.com\/groups\/[^/?#]+\/(?:posts|permalink)\/\d+/i.test(value)) {
+            result = value; return;
+          }
+          if (value && typeof value === 'object') visit(value);
+        }
+      };
+      visit(o); return result;
+    };
     // Walk tìm node có post_id, và bắt page_info cursor
     const walk = (o) => {
       if (!o || typeof o !== 'object') return;
       if (Array.isArray(o)) { for (const x of o) walk(x); return; }
       if (typeof o.post_id === 'string' && /^\d{5,}$/.test(o.post_id)) {
-        const id = o.post_id;
+        const permalink = deepPermalink(o);
+        const match = permalink.match(/\/groups\/([^/?#]+)\/(?:posts|permalink)\/(\d{5,})/i);
+        if (!match) {
+          for (const k in o) { const v = o[k]; if (v && typeof v === 'object') walk(v); }
+          return;
+        }
+        const [, permalinkGroup, permalinkPostId] = match;
+        if (/^\d+$/.test(permalinkGroup) && String(permalinkGroup) !== String(groupId)) return;
+        const id = String(permalinkPostId);
         if (!byId.has(id)) byId.set(id, { postId: id, feedbackId: null, text: '', authorName: '', createdAt: 0 });
         const rec = byId.get(id);
-        rec.feedbackId = rec.feedbackId || deepFbId(o);
+        const foundFeedbackId = deepFbId(o);
+        let feedbackMatches = false;
+        try { feedbackMatches = atob(String(foundFeedbackId || '')).endsWith(':' + id); } catch {}
+        rec.feedbackId = rec.feedbackId || (feedbackMatches ? foundFeedbackId : feedbackIdOf(id));
+        rec.permalink = permalink;
         if (!rec.text) rec.text = deepText(o);
         if (!rec.authorName) rec.authorName = deepAuthor(o);
         if (!rec.createdAt) rec.createdAt = deepCreatedAt(o);
@@ -285,7 +312,7 @@ const GROUP_FEED = {
         postId: rec.postId, feedbackId: rec.feedbackId, text: rec.text,
         authorName: rec.authorName || '',
         createdAt: rec.createdAt || 0,
-        permalink: `https://www.facebook.com/groups/${groupId}/posts/${rec.postId}/`,
+        permalink: rec.permalink,
       });
     }
     const dbg = `nodes=${byId.size}, có chữ+id=${posts.length}, dòng JSON=${arr.length}`;

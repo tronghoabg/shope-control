@@ -329,11 +329,18 @@ async function postQueueItem(postId, execute) {
   }
   if (!r?.ok) {
     await serverLock(serverTargetKey, false)
-    writeLog('error', `Comment thất bại: ${r?.error || 'Facebook không trả kết quả'}.`, targetMeta)
+    const errorText = String(r?.error || 'Facebook không trả kết quả')
+    const invalidTarget = /field_exception|không xem được nội dung|cannot see|unsupported post|invalid.*feedback/i.test(errorText)
+    writeLog('error', `Comment thất bại: ${errorText}.`, targetMeta)
     const current = load(), currentState = current.state || {}
     const failures = Math.min(6, Number(currentState.consecutivePostErrors || 0) + 1)
     const backoffSec = Math.min(30 * 60, 60 * (2 ** (failures - 1)))
-    save({ state: { ...currentState, consecutivePostErrors: failures, nextActionAt: Date.now() + backoffSec * 1000 }, stats: { ...(current.stats || {}), lastError: r?.error || 'Comment thất bại' } })
+    save({
+      ...(invalidTarget ? { queue: (current.queue || []).filter(x => String(x.postId) !== postKey) } : {}),
+      state: { ...currentState, consecutivePostErrors: failures, nextActionAt: Date.now() + backoffSec * 1000 },
+      stats: { ...(current.stats || {}), lastError: errorText },
+    })
+    if (invalidTarget) writeLog('info', 'Đã loại bài không hợp lệ khỏi hàng chờ; Auto sẽ chuyển sang bài khác.', targetMeta)
     writeLog('info', `Tạm chờ ${Math.ceil(backoffSec / 60)} phút trước khi thử tác vụ tiếp theo để tránh lặp lỗi Facebook.`, targetMeta, `post-backoff-${postKey}`, backoffSec * 1000)
     return r
   }
