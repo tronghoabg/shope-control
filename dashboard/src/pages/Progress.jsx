@@ -7,7 +7,7 @@ import { useShope } from '../ShopeContext.jsx'
 import { Card, Btn, Stat } from '../ui.jsx'
 import { Msg } from '../LogPanel.jsx'
 
-const PHASE = { scan: 'Đang quét bài & soạn comment', discover: 'Đang chấm điểm nhóm', search: 'Đang tìm & chấm điểm nhóm mới', post: 'Đang đăng bài' }
+const PHASE = { startup: 'Đang khởi động Auto', scan: 'Đang tìm bài mới', analyze: 'Đang phân tích bài viết', compose: 'Đang soạn comment', comment: 'Đang chuẩn bị comment', posting: 'Đang gửi comment', waiting: 'Đang chờ lượt tiếp theo', discover: 'Đang chấm điểm nhóm', search: 'Đang tìm & chấm điểm nhóm mới', post: 'Đang đăng bài' }
 const TONE = {
   green: 'border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-300',
   amber: 'border-amber-500/30 bg-amber-500/[0.06] text-amber-300',

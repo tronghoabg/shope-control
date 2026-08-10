@@ -5,7 +5,7 @@ const OWNED_KEYS = [
   'cfg', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'searchResults', 'searchAt',
   'searchCursors', 'searchKeywords', 'searchHasMore', 'targetPages', 'pageSearchResults',
   'pageSearchCursors', 'pageSearchKeywords', 'pageHasMore', 'savedGroupLists',
-  'savedPageLists', 'savedPosts', 'queue', 'commentHistory', 'commentedPostIds', 'activitySyncedAt', 'activitySyncRetryAt', 'activitySyncStats', 'state', 'stats', 'job', 'logs',
+  'savedPageLists', 'savedPosts', 'queue', 'commentHistory', 'commentedPostIds', 'activitySyncedAt', 'activitySyncRetryAt', 'activitySyncStats', 'state', 'stats', 'job', 'logs', 'progress',
 ]
 
 function load() {
@@ -25,11 +25,22 @@ function readPostLocks() {
 }
 function acquirePostLock(postId) {
   const now = Date.now(), locks = readPostLocks()
-  for (const [key, value] of Object.entries(locks)) if (now - Number(value?.at || 0) > 24 * 60 * 60 * 1000) delete locks[key]
+  for (const [key, value] of Object.entries(locks)) if (now - Number(value?.at || 0) > 15 * 60 * 1000) delete locks[key]
+  if (locks[postId]?.owner === controllerInstanceId) {
+    locks[postId].at = now
+    localStorage.setItem(POST_LOCK_KEY, JSON.stringify(locks))
+    return true
+  }
   if (locks[postId]) return false
   locks[postId] = { owner: controllerInstanceId, at: now }
   localStorage.setItem(POST_LOCK_KEY, JSON.stringify(locks))
   return readPostLocks()[postId]?.owner === controllerInstanceId
+}
+function setProgress(phase, label, current = 0, total = 0, extra = {}) {
+  save({ progress: { active: true, phase, label, current, total, updatedAt: Date.now(), ...extra } })
+}
+function clearProgress(label = '') {
+  save({ progress: { active: false, phase: '', label, current: 0, total: 0, updatedAt: Date.now() } })
 }
 function releasePostLock(postId) {
   const locks = readPostLocks()
@@ -125,9 +136,12 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity) {
   const cursors = { ...(st.groupCursors || {}) }; let added = 0, firstError = null
   const countGroups = Math.min(ids.length, limitGroups), start = Number(st.groupIdx || 0) % ids.length
   const selectedIds = Array.from({ length: countGroups }, (_, n) => ids[(start + n) % ids.length])
+  setProgress('scan', `Chuẩn bị tìm bài mới trong ${countGroups} nhóm mục tiêu…`, 0, countGroups)
   writeLog('info', `Bắt đầu chu kỳ quét ${countGroups}/${ids.length} nhóm · tối đa ${cfg.postsPerScan || 5} bài/nhóm · ngưỡng AI ${cfg.minScore || 60} điểm.`)
-  for (const groupId of selectedIds) {
+  for (let groupNo = 0; groupNo < selectedIds.length; groupNo++) {
+    const groupId = selectedIds[groupNo]
     const gi = groupInfo(st, groupId)
+    setProgress('scan', `Đang tìm bài mới trong ${gi.groupName}…`, groupNo + 1, countGroups, gi)
     writeLog('info', `Đang quét ${gi.groupName}…`, { kind: 'group', ...gi, link: gi.groupUrl })
     const r = await execute({ type: 'EXEC_FETCH_GROUP_FEED', groupId, cursor: fresh ? null : cursors[groupId], count: cfg.postsPerScan || 5 }, 120000)
     if (!r?.ok) {
@@ -146,6 +160,7 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity) {
       const postId = String(post.postId || '')
       const link = post.permalink || `https://www.facebook.com/groups/${groupId}/posts/${postId}`
       const meta = { kind: 'post', ...gi, postId, link, content: clip(post.text) }
+      setProgress('analyze', `Đang đọc bài ${postNo + 1}/${posts.length} trong ${gi.groupName}…`, postNo + 1, posts.length, meta)
       const postTime = Number(post.createdAt || 0)
       const ageLabel = postTime ? ` · đăng ${new Date(postTime).toLocaleString('vi')}` : ' · chưa lấy được thời gian đăng'
       writeLog('info', `Đọc bài ${postNo + 1}/${posts.length}${ageLabel}: ${clip(post.text, 110) || '(không có nội dung chữ)'}`, meta)
@@ -161,6 +176,7 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity) {
         continue
       }
       writeLog('info', 'Đang nhờ AI đánh giá mức độ tiềm năng…', meta)
+      setProgress('analyze', `AI đang phân tích bài ${postNo + 1}/${posts.length} trong ${gi.groupName}…`, postNo + 1, posts.length, meta)
       let cls
       try {
         cls = await ai('classify', { text: post.text, group: groupId, mode: cfg.mode || 'affiliate', seed: cfg.seedContent || '' })
@@ -174,6 +190,7 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity) {
         continue
       }
       writeLog('success', `Bài đạt ${score} điểm · đang soạn comment…`, meta)
+      setProgress('compose', `AI đang soạn comment cho bài tại ${gi.groupName}…`, postNo + 1, posts.length, meta)
       let made
       try {
         if (cfg.mode === 'social') made = cfg.seedContent
@@ -209,6 +226,7 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity) {
     }
   }
   save({ queue, groupCursors: cursors, groupIdx: (start + countGroups) % ids.length })
+  setProgress('scan', added ? `Đã tìm thấy ${added} bài phù hợp; chuẩn bị comment…` : 'Chưa có bài phù hợp; sẽ chuyển sang nhóm khác ở lượt tiếp theo.', countGroups, countGroups)
   writeLog(added ? 'success' : 'info', `Kết thúc chu kỳ quét: thêm ${added} bài vào hàng chờ · hiện có ${queue.length} bài.`)
   if (!added && firstError) return { ok: false, error: firstError, queued: 0 }
   return { ok: true, queued: added }
@@ -292,9 +310,11 @@ async function postQueueItem(postId, execute) {
   }
   if (!String(item.comment || '').trim() && !cfg.commentImageBase64 && !cfg.commentVideoKey) return { ok: false, error: 'Nội dung comment rỗng' }
   if (!acquirePostLock(postKey)) {
+    setProgress('waiting', `Bài ${postKey} đang được một tab khác xử lý; Auto sẽ chuyển tiếp.`)
     writeLog('info', `Đã chặn tác vụ trùng từ tab khác cho bài ${postKey}.`, targetMeta, `locked-${postKey}`, 60 * 1000)
     return { ok: true, skipped: true, result: { skipped: 'Bài đang được tab khác xử lý' } }
   }
+  setProgress('comment', `Chuẩn bị comment vào ${targetName} · bài ${postKey}…`, 0, 0, targetMeta)
   const serverTargetKey = `comment:${postKey}`
   const remoteLock = await serverLock(serverTargetKey, true)
   if (!remoteLock.ok) {
@@ -312,6 +332,7 @@ async function postQueueItem(postId, execute) {
     return { ok: false, quotaBlocked: true, error }
   }
   postingPostIds.add(postKey)
+  setProgress('posting', `Đang gửi comment lên Facebook tại ${targetName}…`, 0, 0, targetMeta)
   writeLog('info', `Đang gửi comment lên Facebook: “${clip(item.comment, 180)}”`, targetMeta)
   let r
   try {
@@ -340,6 +361,9 @@ async function postQueueItem(postId, execute) {
       state: { ...currentState, consecutivePostErrors: failures, nextActionAt: Date.now() + backoffSec * 1000 },
       stats: { ...(current.stats || {}), lastError: errorText },
     })
+    setProgress('waiting', invalidTarget
+      ? `Đã loại bài không truy cập được; chuẩn bị chuyển sang bài khác.`
+      : `Facebook báo lỗi; sẽ thử tác vụ tiếp theo sau ${Math.ceil(backoffSec / 60)} phút.`)
     if (invalidTarget) writeLog('info', 'Đã loại bài không hợp lệ khỏi hàng chờ; Auto sẽ chuyển sang bài khác.', targetMeta)
     writeLog('info', `Tạm chờ ${Math.ceil(backoffSec / 60)} phút trước khi thử tác vụ tiếp theo để tránh lặp lỗi Facebook.`, targetMeta, `post-backoff-${postKey}`, backoffSec * 1000)
     return r
@@ -351,6 +375,7 @@ async function postQueueItem(postId, execute) {
   state = { ...state, doneToday: Number(state.doneToday || 0) + 1, consecutivePostErrors: 0, nextActionAt: Date.now() + (lo + Math.floor(Math.random() * (hi - lo + 1))) * 1000 }
   save({ queue, commentHistory: history, commentedPostIds, state, stats: { ...(st.stats || {}), totalCommented: Number(st.stats?.totalCommented || 0) + 1, lastRunAt: Date.now(), lastError: '' } })
   const waitSec = Math.max(0, Math.ceil((state.nextActionAt - Date.now()) / 1000))
+  setProgress('waiting', `Comment thành công tại ${targetName}. Lượt tiếp theo sau khoảng ${waitSec} giây.`)
   writeLog('success', `Đã comment thành công tại ${targetName} · lần tiếp theo sau khoảng ${waitSec} giây.`, {
     ...targetMeta, tag: item.isPage ? 'Comment Page' : (item.mode === 'social' ? 'Comment dạo' : 'Rải link'),
     link: r?.result?.permalink || item.permalink || targetMeta.link,
@@ -491,7 +516,8 @@ export async function runWebCommand(payload, execute) {
     const st = load(); if (st.job?.running) return { ok: false, error: 'Đang có chiến dịch chạy — hãy dừng trước khi bật Auto' }
     const cfg = { ...(st.cfg || {}), autoEnabled: true, killSwitch: false }
     const state = { ...(st.state || {}), nextActionAt: 0, consecutivePostErrors: 0 }
-    save({ cfg, state })
+    localStorage.removeItem(POST_LOCK_KEY)
+    save({ cfg, state, progress: { active: true, phase: 'startup', label: 'Đang khởi động Auto và chuẩn bị tìm bài mới…', current: 0, total: 0, updatedAt: Date.now() } })
     writeLog('success', `Đã bật Auto · ${cfg.groupIds?.length || 0} nhóm mục tiêu · cap ${cfg.dailyCap || 30}/ngày · giãn cách ${cfg.minDelaySec || 90}–${cfg.maxDelaySec || 240} giây · ưu tiên bài trong ${cfg.maxPostAgeHours || 72} giờ gần nhất.`)
     await execute({ type: 'EXEC_CONFIGURE_FAILOVER', autoEnabled: true, killSwitch: false })
     setTimeout(() => runWebCommand({ type: 'AUTO_TICK' }, execute).catch(error => writeLog('error', `Auto không khởi chạy được: ${error?.message || error}`)), 0)
@@ -509,22 +535,27 @@ export async function runWebCommand(payload, execute) {
     if (!cfg.autoEnabled || cfg.killSwitch) return { ok: true, result: { skipped: 'Auto tắt' } }
     if (state.dateKey !== key) { state = { ...state, dateKey: key, doneToday: 0 }; save({ state }) }
     if (Number(state.doneToday || 0) >= Number(cfg.dailyCap || 30)) {
+      setProgress('waiting', `Đã đạt hạn mức ${cfg.dailyCap || 30} lượt hôm nay.`)
       writeLog('info', `Auto tạm nghỉ: đã đạt cap ${cfg.dailyCap || 30} lượt hôm nay.`, {}, `daily-cap-${key}`, 24 * 60 * 60 * 1000)
       return { ok: true, result: { skipped: 'Đạt cap ngày' } }
     }
     if (Date.now() < Number(state.nextActionAt || 0)) {
+      const waitSec = Math.max(1, Math.ceil((Number(state.nextActionAt) - Date.now()) / 1000))
+      setProgress('waiting', `Đang chờ giãn cách an toàn; lượt tiếp theo sau khoảng ${waitSec} giây.`)
       return { ok: true, result: { skipped: 'Đang chờ delay' } }
     }
-    await syncFacebookActivity(execute)
     if (!(load().queue || []).length) await scanGroups(execute, false, 1)
     const queue = load().queue || []
     const item = cfg.requireApproval ? queue.find(x => x.approved) : queue[0]
     if (!item) {
       const reason = queue.length ? 'Hàng chờ đang đợi user duyệt.' : 'Chu kỳ này không tìm thấy bài phù hợp.'
       writeLog('info', reason, {}, queue.length ? 'await-approval' : 'no-candidate', 15 * 60 * 1000)
+      setProgress('waiting', queue.length ? 'Đang chờ bạn duyệt comment trong hàng chờ.' : 'Chưa tìm thấy bài phù hợp; lượt sau sẽ quét nhóm tiếp theo.')
       return { ok: true, result: { skipped: queue.length ? 'Chờ duyệt' : 'Không có bài phù hợp' } }
     }
-    const result = await postQueueItem(item.postId, execute); return { ok: result.ok, result, error: result.error }
+    const result = await postQueueItem(item.postId, execute)
+    setTimeout(() => syncFacebookActivity(execute).catch(() => {}), 1000)
+    return { ok: result.ok, result, error: result.error }
   }
   if (type === 'START_JOB') {
     if (!['comment', 'join', 'postgroup'].includes(payload.kind)) return { ok: false, error: 'Loại chiến dịch không hợp lệ' }

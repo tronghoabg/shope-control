@@ -20,7 +20,7 @@ export default function LiveSidebar({ open, onClose }) {
   const { s } = useShope()
   if (!open) return null
   const job = s?.job
-  const cfg = s?.cfg || {}, state = s?.state || {}, stats = s?.stats || {}
+  const cfg = s?.cfg || {}, state = s?.state || {}, stats = s?.stats || {}, progress = s?.progress
   const autoOn = cfg.autoEnabled && !cfg.killSwitch
   const running = !!job?.running
   const pct = job && job.total > 0 ? Math.min(100, Math.round((job.idx / job.total) * 100)) : 0
@@ -84,7 +84,11 @@ export default function LiveSidebar({ open, onClose }) {
           ) : autoOn ? (
             <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.05] p-4">
               <div className="flex items-center gap-2 text-sm font-extrabold text-emerald-300"><IconRobot size={17} /> Auto đang chạy</div>
-              <div className="mt-1.5 text-xs text-slate-300">{AUTO_NOTE[stats.autoNote] || 'Đang quét nhóm & đăng comment tự động.'}</div>
+              <div className="mt-1.5 text-xs leading-relaxed text-slate-300">{progress?.active && progress?.label ? progress.label : (AUTO_NOTE[stats.autoNote] || 'Đang quét nhóm & đăng comment tự động.')}</div>
+              {progress?.active && progress?.total > 0 && <div className="mt-2">
+                <div className="mb-1 flex justify-between text-[10px] font-mono text-slate-500"><span>Tiến độ</span><span>{progress.current || 0}/{progress.total}</span></div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-slate-900"><div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all" style={{ width: `${Math.min(100, Math.round(((progress.current || 0) / progress.total) * 100))}%` }} /></div>
+              </div>}
               <div className="mt-2 text-[11px] font-mono text-slate-400">Đã đăng {state.doneToday || 0}/{cfg.dailyCap || 0} hôm nay</div>
             </div>
           ) : (
