@@ -598,6 +598,9 @@ export async function runWebCommand(payload, execute) {
     const cfg = { ...(st.cfg || {}), autoEnabled: true, killSwitch: false }
     const state = { ...(st.state || {}), nextActionAt: 0, consecutivePostErrors: 0, autoRunToken: id('run') }
     localStorage.removeItem(POST_LOCK_KEY)
+    // Bấm Bật Auto là một lần khởi động phiên mới có chủ ý. Thu hồi lease còn
+    // sót lại do reload/deploy/tab bị đóng để lượt đầu không bị chặn âm thầm.
+    localStorage.removeItem(TASK_LEASE_KEY)
     const retainedQueue = (st.queue || []).filter(x => x.manual || x.approved)
     save({ cfg, state, queue: retainedQueue, progress: { active: true, phase: 'startup', label: retainedQueue.length ? `Đang khởi động Auto; giữ lại ${retainedQueue.length} bài thủ công/đã duyệt…` : 'Đang khởi động Auto và tìm bài mới…', current: 0, total: 0, updatedAt: Date.now() } })
     writeLog('success', `Đã bật Auto · ${cfg.groupIds?.length || 0} nhóm mục tiêu · cap ${cfg.dailyCap || 30}/ngày · giãn cách ${cfg.minDelaySec || 90}–${cfg.maxDelaySec || 240} giây · ưu tiên bài trong ${cfg.maxPostAgeHours || 72} giờ gần nhất.`)
@@ -614,7 +617,11 @@ export async function runWebCommand(payload, execute) {
   }
   if (type === 'AUTO_TICK') {
     if (autoTickRunning) return { ok: true, result: { skipped: 'Một lượt Auto khác đang xử lý' } }
-    if (!acquireTaskLease('auto')) return { ok: true, result: { skipped: 'Một tab khác đang điều khiển Auto' } }
+    if (!acquireTaskLease('auto')) {
+      setProgress('waiting', 'Một tab ToolMKT khác đang điều khiển Auto. Hãy đóng tab còn lại hoặc bấm Tắt → Bật lại để chuyển quyền sang tab này.')
+      writeLog('info', 'Auto chưa chạy vì một tab ToolMKT khác đang giữ quyền điều khiển.', {}, 'auto-other-tab', 60 * 1000)
+      return { ok: true, result: { skipped: 'Một tab khác đang điều khiển Auto' } }
+    }
     autoTickRunning = true
     try {
     const st = load(), cfg = st.cfg || {}; let state = st.state || {}, key = todayKey()
