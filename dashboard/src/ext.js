@@ -1,13 +1,14 @@
 // Cầu nối tới extension qua content script dashboard_bridge.js (window.postMessage).
 import { runWebCommand } from './webController.js'
 let _ready = false
+let _extensionVersion = ''
 let _seq = 0
 const _pending = new Map()
 const SIGNAL_PROTOCOL = 1
 
 window.addEventListener('message', (e) => {
   if (e.source !== window || !e.data) return
-  if (e.data.__shopeReady) { _ready = true; return }
+  if (e.data.__shopeReady) { _ready = true; _extensionVersion = String(e.data.version || ''); return }
   if (e.data.__shopeRes) {
     const cb = _pending.get(e.data.id)
     if (cb) { _pending.delete(e.data.id); cb(e.data.res) }
@@ -15,6 +16,15 @@ window.addEventListener('message', (e) => {
 })
 
 export function extReady() { return _ready }
+export function extensionVersion() { return _extensionVersion }
+function versionAtLeast(current, required) {
+  const a = String(current || '').split('.').map(x => Number(x) || 0)
+  const b = String(required || '').split('.').map(x => Number(x) || 0)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0)
+  }
+  return true
+}
 
 function sendSignal(payload, timeoutMs = 20000) {
   return new Promise((resolve) => {
@@ -37,6 +47,9 @@ function sendSignal(payload, timeoutMs = 20000) {
 
 export async function ext(payload, timeoutMs = 20000) {
   try {
+    if (payload?.type === 'START_AUTO' && !versionAtLeast(_extensionVersion, '1.5.3')) {
+      return { ok: false, error: `Extension ${_extensionVersion || 'không xác định'} đã cũ. Hãy cập nhật/reload ToolMKT AI v1.5.3 trở lên trước khi bật Auto.` }
+    }
     const handled = await runWebCommand(payload, sendSignal)
     return handled === null ? sendSignal(payload, timeoutMs) : handled
   } catch (error) {

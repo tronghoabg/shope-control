@@ -35,7 +35,9 @@ export default function Progress({ goto }) {
 
   const cfg = s.cfg || {}, state = s.state || {}, stats = s.stats || {}, job = s.job
   const prog = s.progress
-  const progFresh = prog?.active && prog.updatedAt && (now - prog.updatedAt < 20000)
+  // Một lần đọc Facebook/AI có thể kéo dài vài phút. Giữ trạng thái hiện tại
+  // đủ lâu để người dùng không thấy giao diện quay về thông báo chung giữa tác vụ.
+  const progFresh = prog?.active && prog.updatedAt && (now - prog.updatedAt < 5 * 60 * 1000)
   const autoOn = cfg.autoEnabled && !cfg.killSwitch
   const jobOn = job?.running
   const waitLeft = autoOn && state.nextActionAt > now ? Math.ceil((state.nextActionAt - now) / 1000) : 0

@@ -20,6 +20,13 @@ function id(prefix) { return prefix + '_' + Date.now().toString(36) + Math.rando
 const lastLogAt = new Map()
 const postingPostIds = new Set()
 const controllerInstanceId = id('tab')
+let autoTickRunning = false
+function autoRunActive(token) {
+  if (!token) return true
+  const st = load()
+  return st.cfg?.autoEnabled && !st.cfg?.killSwitch && st.state?.autoRunToken === token
+}
+function cancelledResult() { return { ok: true, cancelled: true, result: { skipped: 'Auto đã dừng hoặc được khởi động lại' } } }
 function readPostLocks() {
   try { return JSON.parse(localStorage.getItem(POST_LOCK_KEY) || '{}') || {} } catch { return {} }
 }
@@ -122,7 +129,7 @@ function candidates(text, catalog) {
   return (catalog || []).map(p => ({ p, score: (p.keywords || []).reduce((n, k) => n + (String(text).toLowerCase().includes(String(k).toLowerCase()) ? 3 : 0), 0) + String(p.name || '').toLowerCase().split(/\W+/).reduce((n, w) => n + (words.has(w) ? 1 : 0), 0) })).sort((a, b) => b.score - a.score).slice(0, 8).map(x => x.p)
 }
 
-async function scanGroups(execute, fresh = false, limitGroups = Infinity) {
+async function scanGroups(execute, fresh = false, limitGroups = Infinity, runToken = '') {
   const st = load(), cfg = st.cfg || {}, ids = cfg.groupIds || []
   if (!ids.length) {
     writeLog('error', 'Không thể quét: chưa chọn nhóm mục tiêu.')
@@ -139,11 +146,13 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity) {
   setProgress('scan', `Chuẩn bị tìm bài mới trong ${countGroups} nhóm mục tiêu…`, 0, countGroups)
   writeLog('info', `Bắt đầu chu kỳ quét ${countGroups}/${ids.length} nhóm · tối đa ${cfg.postsPerScan || 5} bài/nhóm · ngưỡng AI ${cfg.minScore || 60} điểm.`)
   for (let groupNo = 0; groupNo < selectedIds.length; groupNo++) {
+    if (!autoRunActive(runToken)) return cancelledResult()
     const groupId = selectedIds[groupNo]
     const gi = groupInfo(st, groupId)
     setProgress('scan', `Đang tìm bài mới trong ${gi.groupName}…`, groupNo + 1, countGroups, gi)
     writeLog('info', `Đang quét ${gi.groupName}…`, { kind: 'group', ...gi, link: gi.groupUrl })
     const r = await execute({ type: 'EXEC_FETCH_GROUP_FEED', groupId, cursor: fresh ? null : cursors[groupId], count: cfg.postsPerScan || 5 }, 120000)
+    if (!autoRunActive(runToken)) return cancelledResult()
     if (!r?.ok) {
       const error = r?.error || 'Không đọc được feed nhóm'
       firstError ||= error
@@ -156,6 +165,7 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity) {
     const posts = [...(r.feed?.posts || [])].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
     writeLog('success', `Đã tải ${posts.length} bài từ ${gi.groupName}.`, { kind: 'post', ...gi })
     for (let postNo = 0; postNo < posts.length; postNo++) {
+      if (!autoRunActive(runToken)) return cancelledResult()
       const post = posts[postNo]
       const postId = String(post.postId || '')
       const link = post.permalink || `https://www.facebook.com/groups/${groupId}/posts/${postId}`
@@ -184,6 +194,7 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity) {
         writeLog('error', `AI đánh giá lỗi: ${error?.message || error}`, meta)
         continue
       }
+      if (!autoRunActive(runToken)) return cancelledResult()
       const score = Number(cls?.score || 0)
       if (!cls?.potential || score < Number(cfg.minScore || 60)) {
         writeLog('info', `Bỏ qua: AI chấm ${score}/${cfg.minScore || 60} điểm${cls?.reason ? ` · ${clip(cls.reason, 140)}` : ''}.`, meta)
@@ -219,6 +230,7 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity) {
         writeLog('error', `Soạn comment lỗi: ${error?.message || error}`, meta)
         continue
       }
+      if (!autoRunActive(runToken)) return cancelledResult()
       if (made?.skip || !made?.comment) { writeLog('info', `Bỏ qua: AI không tạo comment${made?.reason ? ` · ${clip(made.reason)}` : ''}.`, meta); continue }
       queue.push({ ...post, groupId: String(groupId), groupName: gi.groupName, comment: made.comment, link: made.link || null, productName: made.productName || null, score: cls.score || made.score || 0, mode: cfg.mode || 'affiliate', approved: false, addedAt: Date.now() })
       seen.add(postId); added++
@@ -283,7 +295,7 @@ async function syncFacebookActivity(execute, force = false) {
   return { ok: true, count: items.length, pages: pagesFetched, items }
 }
 
-async function postQueueItem(postId, execute) {
+async function postQueueItem(postId, execute, runToken = '') {
   const st = load(), queue = [...(st.queue || [])], at = queue.findIndex(x => String(x.postId) === String(postId))
   if (at < 0) return { ok: false, error: 'Không tìm thấy bài trong hàng chờ' }
   const item = queue[at], cfg = { ...(st.cfg || {}), ...executorCfg }
@@ -298,6 +310,7 @@ async function postQueueItem(postId, execute) {
     kind: 'post', postId: postKey, groupId: String(targetId || ''),
     groupName: targetName, link: item.permalink || '', content: clip(item.comment, 320),
   }
+  if (!autoRunActive(runToken)) return cancelledResult()
   if (alreadyCommented.has(postKey)) {
     queue.splice(at, 1)
     save({ queue })
@@ -322,6 +335,11 @@ async function postQueueItem(postId, execute) {
     writeLog('info', `Đã chặn đăng trùng đa máy cho bài ${postKey}: ${remoteLock.reason === 'already_completed' ? 'đã hoàn thành trước đó' : 'máy khác đang xử lý'}.`, targetMeta)
     return { ok: true, skipped: true, result: { skipped: 'Đã xử lý hoặc đang chạy trên máy khác' } }
   }
+  if (!autoRunActive(runToken)) {
+    releasePostLock(postKey)
+    await serverLock(serverTargetKey, false)
+    return cancelledResult()
+  }
   writeLog('info', `Chuẩn bị comment vào ${targetName} · bài ${postKey}.`, targetMeta)
   const quota = await usage()
   if (!quota.ok || quota.remaining === 0) {
@@ -330,6 +348,11 @@ async function postQueueItem(postId, execute) {
     releasePostLock(postKey)
     await serverLock(serverTargetKey, false)
     return { ok: false, quotaBlocked: true, error }
+  }
+  if (!autoRunActive(runToken)) {
+    releasePostLock(postKey)
+    await serverLock(serverTargetKey, false)
+    return cancelledResult()
   }
   postingPostIds.add(postKey)
   setProgress('posting', `Đang gửi comment lên Facebook tại ${targetName}…`, 0, 0, targetMeta)
@@ -361,12 +384,20 @@ async function postQueueItem(postId, execute) {
       state: { ...currentState, consecutivePostErrors: failures, nextActionAt: invalidTarget ? 0 : Date.now() + backoffSec * 1000 },
       stats: { ...(current.stats || {}), lastError: errorText },
     })
-    setProgress('waiting', invalidTarget
+    if (autoRunActive(runToken)) setProgress('waiting', invalidTarget
       ? `Đã loại bài không truy cập được; chuẩn bị chuyển sang bài khác.`
       : `Facebook báo lỗi; sẽ thử tác vụ tiếp theo sau ${Math.ceil(backoffSec / 60)} phút.`)
-    if (invalidTarget) {
-      writeLog('info', 'Đã loại bài không hợp lệ khỏi hàng chờ; đang chuyển ngay sang bài khác.', targetMeta)
-      setTimeout(() => runWebCommand({ type: 'AUTO_TICK' }, execute).catch(() => {}), 300)
+    if (invalidTarget && failures < 3) {
+      if (autoRunActive(runToken)) {
+        writeLog('info', 'Đã loại bài không hợp lệ khỏi hàng chờ; đang chuyển ngay sang bài khác.', targetMeta)
+        setTimeout(() => runWebCommand({ type: 'AUTO_TICK' }, execute).catch(() => {}), 1000)
+      }
+    } else if (invalidTarget && failures >= 3) {
+      const retryAt = Date.now() + 30 * 1000
+      const latest = load()
+      save({ state: { ...(latest.state || {}), nextActionAt: retryAt } })
+      if (autoRunActive(runToken)) setProgress('waiting', 'Đã gặp 3 bài không truy cập được liên tiếp; tạm nghỉ 30 giây rồi chuyển nhóm.')
+      writeLog('error', 'Đã gặp 3 bài không truy cập được liên tiếp · tạm nghỉ 30 giây và sẽ chuyển nhóm.', targetMeta, 'invalid-loop', 30 * 1000)
     } else {
       writeLog('info', `Tạm chờ ${Math.ceil(backoffSec / 60)} phút trước khi thử tác vụ tiếp theo để tránh lặp lỗi Facebook.`, targetMeta, `post-backoff-${postKey}`, backoffSec * 1000)
     }
@@ -379,7 +410,7 @@ async function postQueueItem(postId, execute) {
   state = { ...state, doneToday: Number(state.doneToday || 0) + 1, consecutivePostErrors: 0, nextActionAt: Date.now() + (lo + Math.floor(Math.random() * (hi - lo + 1))) * 1000 }
   save({ queue, commentHistory: history, commentedPostIds, state, stats: { ...(st.stats || {}), totalCommented: Number(st.stats?.totalCommented || 0) + 1, lastRunAt: Date.now(), lastError: '' } })
   const waitSec = Math.max(0, Math.ceil((state.nextActionAt - Date.now()) / 1000))
-  setProgress('waiting', `Comment thành công tại ${targetName}. Lượt tiếp theo sau khoảng ${waitSec} giây.`)
+  if (autoRunActive(runToken)) setProgress('waiting', `Comment thành công tại ${targetName}. Lượt tiếp theo sau khoảng ${waitSec} giây.`)
   writeLog('success', `Đã comment thành công tại ${targetName} · lần tiếp theo sau khoảng ${waitSec} giây.`, {
     ...targetMeta, tag: item.isPage ? 'Comment Page' : (item.mode === 'social' ? 'Comment dạo' : 'Rải link'),
     link: r?.result?.permalink || item.permalink || targetMeta.link,
@@ -519,7 +550,7 @@ export async function runWebCommand(payload, execute) {
   if (type === 'START_AUTO') {
     const st = load(); if (st.job?.running) return { ok: false, error: 'Đang có chiến dịch chạy — hãy dừng trước khi bật Auto' }
     const cfg = { ...(st.cfg || {}), autoEnabled: true, killSwitch: false }
-    const state = { ...(st.state || {}), nextActionAt: 0, consecutivePostErrors: 0 }
+    const state = { ...(st.state || {}), nextActionAt: 0, consecutivePostErrors: 0, autoRunToken: id('run') }
     localStorage.removeItem(POST_LOCK_KEY)
     save({ cfg, state, queue: [], progress: { active: true, phase: 'startup', label: 'Đang khởi động Auto, bỏ hàng chờ cũ và tìm bài mới…', current: 0, total: 0, updatedAt: Date.now() } })
     writeLog('success', `Đã bật Auto · ${cfg.groupIds?.length || 0} nhóm mục tiêu · cap ${cfg.dailyCap || 30}/ngày · giãn cách ${cfg.minDelaySec || 90}–${cfg.maxDelaySec || 240} giây · ưu tiên bài trong ${cfg.maxPostAgeHours || 72} giờ gần nhất.`)
@@ -529,12 +560,15 @@ export async function runWebCommand(payload, execute) {
   }
   if (type === 'STOP_AUTO' || type === 'KILL') {
     const kill = type === 'KILL', st = load(), cfg = { ...(st.cfg || {}), autoEnabled: false, ...(kill ? { killSwitch: true } : {}) }
-    save({ cfg })
+    save({ cfg, state: { ...(st.state || {}), autoRunToken: id('stopped') }, progress: { active: false, phase: '', label: kill ? 'Đã dừng khẩn cấp.' : 'Đã tắt Auto.', current: 0, total: 0, updatedAt: Date.now() } })
     writeLog(kill ? 'error' : 'info', kill ? 'Đã kích hoạt DỪNG KHẨN CẤP.' : 'Đã tắt Auto theo yêu cầu.')
     await execute({ type: 'EXEC_CONFIGURE_FAILOVER', autoEnabled: false, killSwitch: kill })
     return { ok: true }
   }
   if (type === 'AUTO_TICK') {
+    if (autoTickRunning) return { ok: true, result: { skipped: 'Một lượt Auto khác đang xử lý' } }
+    autoTickRunning = true
+    try {
     const st = load(), cfg = st.cfg || {}; let state = st.state || {}, key = todayKey()
     if (!cfg.autoEnabled || cfg.killSwitch) return { ok: true, result: { skipped: 'Auto tắt' } }
     if (state.dateKey !== key) { state = { ...state, dateKey: key, doneToday: 0 }; save({ state }) }
@@ -548,7 +582,9 @@ export async function runWebCommand(payload, execute) {
       setProgress('waiting', `Đang chờ giãn cách an toàn; lượt tiếp theo sau khoảng ${waitSec} giây.`)
       return { ok: true, result: { skipped: 'Đang chờ delay' } }
     }
-    if (!(load().queue || []).length) await scanGroups(execute, false, 1)
+    const runToken = state.autoRunToken || ''
+    if (!(load().queue || []).length) await scanGroups(execute, false, 1, runToken)
+    if (!autoRunActive(runToken)) return cancelledResult()
     const queue = load().queue || []
     const item = cfg.requireApproval ? queue.find(x => x.approved) : queue[0]
     if (!item) {
@@ -557,9 +593,9 @@ export async function runWebCommand(payload, execute) {
       setProgress('waiting', queue.length ? 'Đang chờ bạn duyệt comment trong hàng chờ.' : 'Chưa tìm thấy bài phù hợp; lượt sau sẽ quét nhóm tiếp theo.')
       return { ok: true, result: { skipped: queue.length ? 'Chờ duyệt' : 'Không có bài phù hợp' } }
     }
-    const result = await postQueueItem(item.postId, execute)
-    setTimeout(() => syncFacebookActivity(execute).catch(() => {}), 1000)
+    const result = await postQueueItem(item.postId, execute, runToken)
     return { ok: result.ok, result, error: result.error }
+    } finally { autoTickRunning = false }
   }
   if (type === 'START_JOB') {
     if (!['comment', 'join', 'postgroup'].includes(payload.kind)) return { ok: false, error: 'Loại chiến dịch không hợp lệ' }
