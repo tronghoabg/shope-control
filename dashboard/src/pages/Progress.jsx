@@ -34,6 +34,7 @@ export default function Progress({ goto }) {
   if (!s) return <p className="text-slate-500">Đang tải tiến trình…</p>
 
   const cfg = s.cfg || {}, state = s.state || {}, stats = s.stats || {}, job = s.job
+  const report = s.sessionReport || {}
   const prog = s.progress
   // Một lần đọc Facebook/AI có thể kéo dài vài phút. Giữ trạng thái hiện tại
   // đủ lâu để người dùng không thấy giao diện quay về thông báo chung giữa tác vụ.
@@ -112,6 +113,17 @@ export default function Progress({ goto }) {
         <Stat label="Nhóm mục tiêu" value={(cfg.groupIds || []).length} icon={IconTarget} color="indigo" />
         <Stat label="Tổng đã rải" value={stats.totalCommented || 0} icon={IconChecks} color="blue" />
       </div>
+
+      {report.startedAt && <Card className="p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="text-sm font-bold text-slate-200">Báo cáo phiên Auto hiện tại</div>
+          <span className="text-[11px] text-slate-500">Bắt đầu {new Date(report.startedAt).toLocaleTimeString('vi')}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-8">
+          {[['Nhóm đã quét', report.groupsScanned], ['Bài đã đọc', report.postsRead], ['Chống trùng', report.duplicates], ['Lọc từ khóa', report.filtered], ['AI loại', report.aiRejected], ['Vào hàng chờ', report.queued], ['Thành công', report.success], ['Thất bại', report.failed]].map(([label, value]) =>
+            <div key={label} className="rounded-xl border border-slate-800 bg-slate-950/30 p-3"><div className="text-slate-500">{label}</div><div className="mt-1 text-lg font-extrabold text-slate-200">{value || 0}</div></div>)}
+        </div>
+      </Card>}
 
       {/* Chỉnh nhanh hạn mức đăng/ngày */}
       <Card className="flex flex-wrap items-center gap-3 p-4">

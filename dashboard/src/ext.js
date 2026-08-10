@@ -53,8 +53,8 @@ function sendSignal(payload, timeoutMs = 20000) {
 
 export async function ext(payload, timeoutMs = 20000) {
   try {
-    if (NEEDS_CURRENT_EXTENSION.has(payload?.type) && !versionAtLeast(_extensionVersion, '1.5.3')) {
-      return { ok: false, error: `Extension ${_extensionVersion || 'không xác định'} đã cũ. Hãy cập nhật/reload ToolMKT AI v1.5.3 trở lên trước khi bật Auto.` }
+    if (NEEDS_CURRENT_EXTENSION.has(payload?.type) && !versionAtLeast(_extensionVersion, '1.5.4')) {
+      return { ok: false, error: `Extension ${_extensionVersion || 'không xác định'} đã cũ. Hãy cập nhật/reload ToolMKT AI v1.5.4 trở lên trước khi bật Auto.` }
     }
     const handled = await runWebCommand(payload, sendSignal)
     return handled === null ? sendSignal(payload, timeoutMs) : handled

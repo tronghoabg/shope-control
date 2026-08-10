@@ -6,7 +6,7 @@ const OWNED_KEYS = [
   'cfg', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'searchResults', 'searchAt',
   'searchCursors', 'searchKeywords', 'searchHasMore', 'targetPages', 'pageSearchResults',
   'pageSearchCursors', 'pageSearchKeywords', 'pageHasMore', 'savedGroupLists',
-  'savedPageLists', 'savedPosts', 'queue', 'commentHistory', 'commentedPostIds', 'activitySyncedAt', 'activitySyncRetryAt', 'activitySyncStats', 'state', 'stats', 'job', 'logs', 'progress',
+  'savedPageLists', 'savedPosts', 'queue', 'commentHistory', 'commentedPostIds', 'activitySyncedAt', 'activitySyncRetryAt', 'activitySyncStats', 'state', 'stats', 'job', 'logs', 'progress', 'sessionReport',
 ]
 
 function load() {
@@ -164,6 +164,7 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity, runTok
     ...(st.commentHistory || []).map(x => String(x.postId)),
   ])
   const cursors = { ...(st.groupCursors || {}) }; let added = 0, firstError = null
+  const cycle = { groupsScanned: 0, postsRead: 0, duplicates: 0, filtered: 0, aiRejected: 0, queued: 0, scanErrors: 0 }
   const countGroups = Math.min(ids.length, limitGroups), start = Number(st.groupIdx || 0) % ids.length
   const selectedIds = Array.from({ length: countGroups }, (_, n) => ids[(start + n) % ids.length])
   setProgress('scan', `Chuẩn bị tìm bài mới trong ${countGroups} nhóm mục tiêu…`, 0, countGroups)
@@ -177,17 +178,20 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity, runTok
     const r = await execute({ type: 'EXEC_FETCH_GROUP_FEED', groupId, cursor: fresh ? null : cursors[groupId], count: cfg.postsPerScan || 5 }, 120000)
     if (!autoRunActive(runToken)) return cancelledResult()
     if (!r?.ok) {
+      cycle.scanErrors++
       const error = r?.error || 'Không đọc được feed nhóm'
       firstError ||= error
       writeLog('error', `Quét nhóm thất bại: ${error}`, { kind: 'post', ...gi, link: gi.groupUrl })
       continue
     }
+    cycle.groupsScanned++
     cursors[groupId] = fresh ? null : (r.feed?.nextCursor || null)
     const posts = [...(r.feed?.posts || [])].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
     writeLog('success', `Đã tải ${posts.length} bài từ ${gi.groupName}.`, { kind: 'post', ...gi })
     for (let postNo = 0; postNo < posts.length; postNo++) {
       if (!autoRunActive(runToken)) return cancelledResult()
       const post = posts[postNo]
+      cycle.postsRead++
       const postId = String(post.postId || '')
       const link = post.permalink || `https://www.facebook.com/groups/${groupId}/posts/${postId}`
       const meta = { kind: 'post', ...gi, postId, link, content: clip(post.text) }
@@ -196,9 +200,10 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity, runTok
       const ageLabel = postTime ? ` · đăng ${new Date(postTime).toLocaleString('vi')}` : ' · chưa lấy được thời gian đăng'
       writeLog('info', `Đọc bài ${postNo + 1}/${posts.length}${ageLabel}: ${clip(post.text, 110) || '(không có nội dung chữ)'}`, meta)
       if (!postId) { writeLog('info', 'Bỏ qua: Facebook không trả về ID bài viết.', meta); continue }
-      if (seen.has(postId)) { writeLog('info', 'Bỏ qua: bài này đã có trong hàng chờ.', meta); continue }
-      if (commented.has(postId)) { writeLog('info', 'Bỏ qua: đã comment bài này trước đó.', meta); continue }
+      if (seen.has(postId)) { cycle.duplicates++; writeLog('info', 'Bỏ qua: bài này đã có trong hàng chờ.', meta); continue }
+      if (commented.has(postId)) { cycle.duplicates++; writeLog('info', 'Bỏ qua: đã comment bài này trước đó.', meta); continue }
       if (!keywordOk(post.text, cfg.requiredKeywords, cfg.bannedKeywords)) {
+        cycle.filtered++
         writeLog('info', 'Bỏ qua: không khớp từ khóa bắt buộc hoặc chứa từ khóa cấm.', meta)
         continue
       }
@@ -214,6 +219,7 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity, runTok
       if (!autoRunActive(runToken)) return cancelledResult()
       const score = Number(cls?.score || 0)
       if (!cls?.potential || score < Number(cfg.minScore || 60)) {
+        cycle.aiRejected++
         writeLog('info', `Bỏ qua: AI chấm ${score}/${cfg.minScore || 60} điểm${cls?.reason ? ` · ${clip(cls.reason, 140)}` : ''}.`, meta)
         continue
       }
@@ -251,10 +257,14 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity, runTok
       if (made?.skip || !made?.comment) { writeLog('info', `Bỏ qua: AI không tạo comment${made?.reason ? ` · ${clip(made.reason)}` : ''}.`, meta); continue }
       queue.push({ ...post, groupId: String(groupId), groupName: gi.groupName, comment: made.comment, link: made.link || null, productName: made.productName || null, score: cls.score || made.score || 0, mode: cfg.mode || 'affiliate', approved: false, addedAt: Date.now() })
       seen.add(postId); added++
+      cycle.queued++
       writeLog('success', `Đã thêm vào hàng chờ · comment: “${clip(made.comment, 180)}”`, { ...meta, tag: cfg.mode === 'social' ? 'Comment dạo' : 'Rải link', content: clip(made.comment, 300) })
     }
   }
-  save({ queue, groupCursors: cursors, groupIdx: (start + countGroups) % ids.length })
+  const previousReport = load().sessionReport || {}
+  const sessionReport = { ...previousReport, updatedAt: Date.now() }
+  for (const [key, value] of Object.entries(cycle)) sessionReport[key] = Number(previousReport[key] || 0) + Number(value || 0)
+  save({ queue, groupCursors: cursors, groupIdx: (start + countGroups) % ids.length, sessionReport })
   setProgress('scan', added ? `Đã tìm thấy ${added} bài phù hợp; chuẩn bị comment…` : 'Chưa có bài phù hợp; sẽ chuyển sang nhóm khác ở lượt tiếp theo.', countGroups, countGroups)
   writeLog(added ? 'success' : 'info', `Kết thúc chu kỳ quét: thêm ${added} bài vào hàng chờ · hiện có ${queue.length} bài.`)
   if (!added && firstError) return { ok: false, error: firstError, queued: 0 }
@@ -389,12 +399,14 @@ async function postQueueItem(postId, execute, runToken = '') {
     const invalidTarget = /field_exception|không xem được nội dung|cannot see|unsupported post|invalid.*feedback/i.test(errorText)
     writeLog('error', `Comment thất bại: ${errorText}.`, targetMeta)
     const current = load(), currentState = current.state || {}
+    const currentReport = current.sessionReport || {}
     const failures = Math.min(6, Number(currentState.consecutivePostErrors || 0) + 1)
     const backoffSec = Math.min(30 * 60, 60 * (2 ** (failures - 1)))
     save({
       ...(invalidTarget ? { queue: (current.queue || []).filter(x => String(x.postId) !== postKey) } : {}),
       state: { ...currentState, consecutivePostErrors: failures, nextActionAt: invalidTarget ? 0 : Date.now() + backoffSec * 1000 },
       stats: { ...(current.stats || {}), lastError: errorText },
+      sessionReport: { ...currentReport, failed: Number(currentReport.failed || 0) + 1, updatedAt: Date.now() },
     })
     if (autoRunActive(runToken)) setProgress('waiting', invalidTarget
       ? `Đã loại bài không truy cập được; chuẩn bị chuyển sang bài khác.`
@@ -422,7 +434,8 @@ async function postQueueItem(postId, execute, runToken = '') {
   state = { ...state, doneToday: Number(state.doneToday || 0) + 1, consecutivePostErrors: 0, nextActionAt: Date.now() + (lo + Math.floor(Math.random() * (hi - lo + 1))) * 1000 }
   // Lịch sử hiển thị chỉ đến từ Facebook Activity Log. commentedPostIds vẫn
   // được lưu cục bộ để chống đăng trùng ngay trước lần đồng bộ tiếp theo.
-  save({ queue, commentedPostIds, state, stats: { ...(st.stats || {}), totalCommented: Number(st.stats?.totalCommented || 0) + 1, lastRunAt: Date.now(), lastError: '' } })
+  const report = load().sessionReport || {}
+  save({ queue, commentedPostIds, state, sessionReport: { ...report, success: Number(report.success || 0) + 1, updatedAt: Date.now() }, stats: { ...(st.stats || {}), totalCommented: Number(st.stats?.totalCommented || 0) + 1, lastRunAt: Date.now(), lastError: '' } })
   const waitSec = Math.max(0, Math.ceil((state.nextActionAt - Date.now()) / 1000))
   if (autoRunActive(runToken)) setProgress('waiting', `Comment thành công tại ${targetName}. Lượt tiếp theo sau khoảng ${waitSec} giây.`)
   writeLog('success', `Đã comment thành công tại ${targetName} · lần tiếp theo sau khoảng ${waitSec} giây.`, {
@@ -591,12 +604,13 @@ export async function runWebCommand(payload, execute) {
     const st = load(); if (st.job?.running) return { ok: false, error: 'Đang có chiến dịch chạy — hãy dừng trước khi bật Auto' }
     const cfg = { ...(st.cfg || {}), autoEnabled: true, killSwitch: false }
     const state = { ...(st.state || {}), nextActionAt: 0, consecutivePostErrors: 0, autoRunToken: id('run') }
+    const sessionReport = { id: state.autoRunToken, startedAt: Date.now(), updatedAt: Date.now(), groupsScanned: 0, postsRead: 0, duplicates: 0, filtered: 0, aiRejected: 0, queued: 0, scanErrors: 0, success: 0, failed: 0 }
     localStorage.removeItem(POST_LOCK_KEY)
     // Bấm Bật Auto là một lần khởi động phiên mới có chủ ý. Thu hồi lease còn
     // sót lại do reload/deploy/tab bị đóng để lượt đầu không bị chặn âm thầm.
     localStorage.removeItem(TASK_LEASE_KEY)
     const retainedQueue = (st.queue || []).filter(x => x.manual || x.approved)
-    save({ cfg, state, queue: retainedQueue, progress: { active: true, phase: 'startup', label: retainedQueue.length ? `Đang khởi động Auto; giữ lại ${retainedQueue.length} bài thủ công/đã duyệt…` : 'Đang khởi động Auto và tìm bài mới…', current: 0, total: 0, updatedAt: Date.now() } })
+    save({ cfg, state, queue: retainedQueue, sessionReport, progress: { active: true, phase: 'startup', label: retainedQueue.length ? `Đang khởi động Auto; giữ lại ${retainedQueue.length} bài thủ công/đã duyệt…` : 'Đang khởi động Auto và tìm bài mới…', current: 0, total: 0, updatedAt: Date.now() } })
     writeLog('success', `Đã bật Auto · ${cfg.groupIds?.length || 0} nhóm mục tiêu · cap ${cfg.dailyCap || 30}/ngày · giãn cách ${cfg.minDelaySec || 90}–${cfg.maxDelaySec || 240} giây · không giới hạn tuổi bài viết.`)
     await execute({ type: 'EXEC_CONFIGURE_FAILOVER', autoEnabled: true, killSwitch: false })
     setTimeout(() => runWebCommand({ type: 'AUTO_TICK' }, execute).catch(error => writeLog('error', `Auto không khởi chạy được: ${error?.message || error}`)), 0)
@@ -629,6 +643,9 @@ export async function runWebCommand(payload, execute) {
     if (Date.now() < Number(state.nextActionAt || 0)) {
       const waitSec = Math.max(1, Math.ceil((Number(state.nextActionAt) - Date.now()) / 1000))
       setProgress('waiting', `Đang chờ giãn cách an toàn; lượt tiếp theo sau khoảng ${waitSec} giây.`)
+      if (waitSec >= 180 && Date.now() - Number(st.activitySyncedAt || 0) > 10 * 60 * 1000) {
+        await syncFacebookActivity(execute, false)
+      }
       return { ok: true, result: { skipped: 'Đang chờ delay' } }
     }
     const runToken = state.autoRunToken || ''

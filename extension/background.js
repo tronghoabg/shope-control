@@ -1842,9 +1842,25 @@ function notify(title, message) {
 chrome.alarms.onAlarm.addListener(async (a) => {
   // While the web controller owns a live lease, it emits AUTO_TICK itself.
   // Alarm remains as failover and resumes after the web tab disappears.
-  if (a.name === TICK_ALARM) { try { if (!(await webLeaseActive())) await processOneStep(); } catch (e) { console.warn(e); } }
+  if (a.name === TICK_ALARM) {
+    try {
+      if (!(await webLeaseActive())) {
+        const { cfg } = await getCfg();
+        if (cfg.webOwned && cfg.autoEnabled && !cfg.killSwitch) await ensureWebRuntimeTab(cfg);
+        else await processOneStep();
+      }
+    } catch (e) { console.warn(e); }
+  }
   else if (a.name === JOB_ALARM) { try { if (!(await webLeaseActive())) await jobStep(); } catch (e) { console.warn(e); } }
 });
+
+async function ensureWebRuntimeTab(cfg = {}) {
+  const base = String(cfg.webBase || 'https://toolmktai.com').replace(/\/$/, '');
+  const matches = await chrome.tabs.query({ url: [base + '/app*', base + '/app/*'] });
+  if (matches.some(t => t.id != null)) return { ok: true, existing: true };
+  const tab = await chrome.tabs.create({ url: base + '/app?runtime=background', active: false });
+  return { ok: true, tabId: tab.id };
+}
 
 // Bấm icon extension → mở (hoặc focus) control panel tại {webBase}/app
 chrome.action.onClicked.addListener(async () => {
@@ -2061,7 +2077,8 @@ async function handle(request, sendResponse) {
         // v1.5 web-owned campaigns must stop with the web controller. Do not run
         // the legacy state machine against a separate chrome.storage queue.
         await save({ cfg: { ...cfg, autoEnabled: enabled, killSwitch: !!request.killSwitch, webOwned: true } });
-        await chrome.alarms.clear(TICK_ALARM);
+        if (enabled) chrome.alarms.create(TICK_ALARM, { periodInMinutes: 0.5 });
+        else await chrome.alarms.clear(TICK_ALARM);
         sendResponse({ ok: true }); break;
       }
       // Mở link Facebook: tái dùng 1 tab facebook.com đang mở (điều hướng tab đó) thay vì luôn mở tab mới.
