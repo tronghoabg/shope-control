@@ -207,7 +207,8 @@ async function checkQuota(cfg) {
 
 // Báo đã đăng 1 comment (+1 quota). Trả { ok, quota?, msg }
 async function reportComment(cfg, posted) {
-  const r = await webFetch(cfg, '/api/usage', 'POST', posted ? { posted } : undefined);
+  // Server chỉ quản lý quota. Lịch sử hiển thị lấy trực tiếp từ Facebook Activity Log.
+  const r = await webFetch(cfg, '/api/usage', 'POST');
   if (!r || r.neterr) return { ok: true };
   if (r.status === 429) return { ok: false, quota: true, msg: r.json?.error || 'Hết lượt' };
   return { ok: r.status < 300, remaining: r.json?.remaining };

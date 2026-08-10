@@ -82,22 +82,6 @@ async function serverLock(targetKey, acquire) {
     return { ok: r.ok, status: r.status, ...data }
   } catch { return { ok: true, offline: true } }
 }
-async function serverComplete(targetKey, posted) {
-  if (!load().cfg?.licenseToken) return
-  try {
-    await fetch(apiBase() + '/api/automation-lock', {
-      method: 'PATCH', headers: authHeaders(true), body: JSON.stringify({ targetKey, ...(posted || {}) }),
-    })
-  } catch {}
-}
-async function pullServerActivity() {
-  if (!load().cfg?.licenseToken) return null
-  try {
-    const r = await fetch(apiBase() + '/api/activity', { headers: authHeaders() })
-    if (!r.ok) return null
-    return await r.json()
-  } catch { return null }
-}
 
 function todayKey() { const d = new Date(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}` }
 async function ai(task, args) {
@@ -258,15 +242,7 @@ async function syncFacebookActivity(execute, force = false) {
     const errorText = String(error?.message || error)
     const incompatible = /khởi động lại trình duyệt|restart.*browser|unknown action|không hỗ trợ/i.test(errorText)
     const retryAt = Date.now() + (incompatible ? 6 * 60 * 60 * 1000 : 10 * 60 * 1000)
-    const server = await pullServerActivity()
-    if (server?.commentedPostIds?.length) {
-      const current = load()
-      save({
-        commentHistory: server.items || current.commentHistory || [],
-        commentedPostIds: [...new Set([...(current.commentedPostIds || []).map(String), ...server.commentedPostIds.map(String)])].slice(-10000),
-        activitySyncedAt: Number(server.lastSyncedAt || current.activitySyncedAt || 0), activitySyncRetryAt: retryAt,
-      })
-    } else save({ activitySyncRetryAt: retryAt })
+    save({ activitySyncRetryAt: retryAt })
     writeLog(incompatible ? 'info' : 'error', incompatible
       ? 'Extension đang dùng chưa hỗ trợ Activity Log mới. Auto tiếp tục bằng dữ liệu chống trùng đã lưu; hãy reload extension v1.5 khi thuận tiện.'
       : `Không đồng bộ được Activity Log: ${errorText}. Auto tiếp tục dùng dữ liệu chống trùng đã lưu.`, {}, 'activity-error', incompatible ? 6 * 60 * 60 * 1000 : 10 * 60 * 1000)
@@ -280,23 +256,13 @@ async function syncFacebookActivity(execute, force = false) {
     byKey.set(`${item.kind || item.mode}:${item.commentId || item.postId}:${normalized.time}`, normalized)
   }
   const history = [...byKey.values()].sort((a, b) => Number(b.time || b.createdAt || 0) - Number(a.time || a.createdAt || 0)).slice(0, 1000)
-  let commentedPostIds = [...new Set([
+  const commentedPostIds = [...new Set([
     ...(current.commentedPostIds || []).map(String),
     ...items.filter(x => x.kind === 'comment').map(x => String(x.postId)).filter(Boolean),
   ])].slice(-5000)
-  let serverStats = null
-  if (current.cfg?.licenseToken) {
-    try {
-      const response = await fetch(apiBase() + '/api/activity', { method: 'POST', headers: authHeaders(true), body: JSON.stringify({ items }) })
-      if (response.ok) {
-        serverStats = await response.json()
-        commentedPostIds = [...new Set([...commentedPostIds, ...(serverStats.commentedPostIds || []).map(String)])].slice(-10000)
-      }
-    } catch {}
-  }
-  save({ commentHistory: history, commentedPostIds, activitySyncedAt: Date.now(), activitySyncRetryAt: 0, activitySyncStats: { at: Date.now(), received: items.length, pages: pagesFetched, ...(serverStats || {}) } })
-  if (force || Number(serverStats?.added || 0) > 0) writeLog('success', `Đã đọc ${pagesFetched} trang / ${items.length} hoạt động từ Facebook${serverStats ? ` · server thêm ${serverStats.added}, cập nhật ${serverStats.updated}` : ''} · nhận diện ${commentedPostIds.length} bài cần chống trùng.`)
-  return { ok: true, count: items.length, pages: pagesFetched, items, stats: serverStats }
+  save({ commentHistory: history, commentedPostIds, activitySyncedAt: Date.now(), activitySyncRetryAt: 0, activitySyncStats: { at: Date.now(), received: items.length, pages: pagesFetched } })
+  if (force) writeLog('success', `Đã đọc ${pagesFetched} trang / ${items.length} hoạt động trực tiếp từ Facebook · nhận diện ${commentedPostIds.length} bài cần chống trùng.`)
+  return { ok: true, count: items.length, pages: pagesFetched, items }
 }
 
 async function postQueueItem(postId, execute) {
@@ -382,7 +348,7 @@ async function postQueueItem(postId, execute) {
     ...targetMeta, tag: item.isPage ? 'Comment Page' : (item.mode === 'social' ? 'Comment dạo' : 'Rải link'),
     link: r?.result?.permalink || item.permalink || targetMeta.link,
   })
-  await usage('POST', { mode: item.mode || 'comment', groupId: item.isPage ? item.pageId : item.groupId, groupName: item.isPage ? item.pageName : item.groupName, postId: item.postId, content: item.comment, link: item.link || '', permalink: item.permalink || '', sourceKey: `tool:comment:${item.postId}`, fingerprint: serverTargetKey })
+  await usage('POST')
   await serverLock(serverTargetKey, false)
   return { ok: true, result: r.result }
 }
@@ -416,9 +382,8 @@ async function jobTick(execute) {
           ? await execute({ type: 'POST_GROUP', groupId: target, message, link: p.link, images: p.images, videoKey: p.videoKey, bgPresetId: p.bgPresetId }, 240000)
           : await execute({ type: 'EXEC_CREATE_GROUP_POST', groupId: target, message, link: p.link, bgPresetId: p.bgPresetId }, 120000)
         if (r?.ok && !r?.skipped && !(p.images?.length || p.videoKey)) {
-          await usage('POST', { mode: 'post', groupId: target, groupName: label, postId: r?.result?.postId || '', content: message, link: p.link || '', permalink: r?.postUrl || r?.result?.postUrl || '', sourceKey: `tool:${postFingerprint}`, fingerprint: postFingerprint })
+          await usage('POST')
         }
-        if (r?.ok && !r?.skipped) await serverComplete(postFingerprint, { groupId: target, groupName: label, content: message, permalink: r?.postUrl || r?.result?.postUrl || '' })
       } catch (error) {
         r = { ok: false, error: String(error?.message || error) }
       } finally {
@@ -518,9 +483,11 @@ export async function runWebCommand(payload, execute) {
   if (type === 'START_AUTO') {
     const st = load(); if (st.job?.running) return { ok: false, error: 'Đang có chiến dịch chạy — hãy dừng trước khi bật Auto' }
     const cfg = { ...(st.cfg || {}), autoEnabled: true, killSwitch: false }
-    save({ cfg })
+    const state = { ...(st.state || {}), nextActionAt: 0, consecutivePostErrors: 0 }
+    save({ cfg, state })
     writeLog('success', `Đã bật Auto · ${cfg.groupIds?.length || 0} nhóm mục tiêu · cap ${cfg.dailyCap || 30}/ngày · giãn cách ${cfg.minDelaySec || 90}–${cfg.maxDelaySec || 240} giây · ưu tiên bài trong ${cfg.maxPostAgeHours || 72} giờ gần nhất.`)
     await execute({ type: 'EXEC_CONFIGURE_FAILOVER', autoEnabled: true, killSwitch: false })
+    setTimeout(() => runWebCommand({ type: 'AUTO_TICK' }, execute).catch(error => writeLog('error', `Auto không khởi chạy được: ${error?.message || error}`)), 0)
     return { ok: true }
   }
   if (type === 'STOP_AUTO' || type === 'KILL') {

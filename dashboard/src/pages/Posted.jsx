@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { IconTrash, IconExternalLink, IconChecks, IconCloud, IconSearch, IconMessageCircle, IconEyeOff, IconUserSearch, IconClockHour4, IconRefresh } from '@tabler/icons-react'
+import { useState } from 'react'
+import { IconTrash, IconExternalLink, IconChecks, IconSearch, IconMessageCircle, IconEyeOff, IconUserSearch, IconClockHour4, IconRefresh } from '@tabler/icons-react'
 import { useShope } from '../ShopeContext.jsx'
 import { ext, openFb } from '../ext.js'
 import { Card, Btn, Badge, Empty, Input } from '../ui.jsx'
@@ -95,10 +95,8 @@ function Item({ h, pendStatus }) {
 }
 
 export default function Posted() {
-  const { s, call, account, confirm, notify, refresh } = useShope()
+  const { s, call, confirm, notify, refresh } = useShope()
   const local = s?.commentHistory || []
-  const [db, setDb] = useState(null)
-  const [loading, setLoading] = useState(false)
   const [verifying, setVerifying] = useState(false)
   const [syncing, setSyncing] = useState(false)
 
@@ -115,18 +113,7 @@ export default function Posted() {
     else notify('red', r?.error || 'Kiểm tra lỗi (mở sẵn 1 tab facebook.com)')
   }
 
-  useEffect(() => {
-    if (!account?.loggedIn) { setDb(null); return }
-    setLoading(true)
-    fetch('/api/posted', { credentials: 'include' })
-      .then(r => r.ok ? r.json() : { items: [] })
-      .then(d => setDb(d.items || []))
-      .catch(() => setDb(null))
-      .finally(() => setLoading(false))
-  }, [account?.loggedIn])
-
-  const fromDb = account?.loggedIn && Array.isArray(db)
-  const history = [...new Map([...(db || []), ...local].map(h => [
+  const history = [...new Map(local.map(h => [
     `${h.kind || h.mode || ''}:${h.commentId || postIdOf(h)}:${h.time || h.createdAt || ''}`, h,
   ])).values()].sort((a, b) => Number(b.time || b.createdAt || 0) - Number(a.time || a.createdAt || 0))
   const [q, setQ] = useState('')
@@ -139,7 +126,6 @@ export default function Posted() {
 
   const clear = async () => {
     if (!(await confirm('Xoá TOÀN BỘ lịch sử rải tin? Không thể hoàn tác.', { danger: true, confirmText: 'Xoá tất cả' }))) return
-    if (fromDb) { await fetch('/api/posted', { method: 'DELETE', credentials: 'include' }).catch(() => {}); setDb([]) }
     call({ type: 'CLEAR_POSTED' })
   }
   const syncActivity = async () => {
@@ -155,9 +141,7 @@ export default function Posted() {
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-900/65 pb-4">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-extrabold text-slate-100 tracking-tight">Lịch sử đăng & rải link</h1>
-          {fromDb
-            ? <Badge color="green"><IconCloud size={13} className="inline mr-1" /> Đồng bộ server</Badge>
-            : <Badge color="gray">Lưu cục bộ</Badge>}
+          <Badge color="indigo">Nguồn: Facebook Activity Log</Badge>
           {syncStats?.at && <Badge color="indigo">Facebook: {new Date(syncStats.at).toLocaleString('vi')}</Badge>}
         </div>
         <div className="flex items-center gap-2">
@@ -170,7 +154,7 @@ export default function Posted() {
       {syncStats?.at && (
         <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 px-4 py-3 text-xs text-slate-400">
           Lần đồng bộ gần nhất đã đọc <b className="text-slate-200">{syncStats.pages || 0} trang</b> · nhận <b className="text-slate-200">{syncStats.received || 0} hoạt động</b>
-          {syncStats.added != null && <> · server thêm <b className="text-emerald-300">{syncStats.added}</b>, cập nhật <b className="text-indigo-300">{syncStats.updated || 0}</b>, bỏ qua <b>{syncStats.ignored || 0}</b></>}.
+          . Dữ liệu được lấy trực tiếp từ tài khoản Facebook đang kết nối.
         </div>
       )}
 
@@ -191,9 +175,7 @@ export default function Posted() {
           </div>
         </div>
 
-        {loading ? (
-          <p className="p-8 text-center text-xs text-slate-500 font-semibold animate-pulse">Đang tải lịch sử từ máy chủ…</p>
-        ) : history.length === 0 ? (
+        {history.length === 0 ? (
           <Empty icon={IconChecks}>Lịch sử rải tin trống. Mọi bình luận hoặc bài viết đăng thành công qua extension sẽ được ghi nhận tại đây.</Empty>
         ) : shown.length === 0 ? (
           <Empty icon={IconSearch}>Không có mục nào khớp bộ lọc.</Empty>
