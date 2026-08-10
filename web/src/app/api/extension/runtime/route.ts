@@ -14,7 +14,7 @@ const runtime = {
     maxDelaySec: 240,
     minScore: 60,
     postsPerScan: 5,
-    maxPostAgeHours: 72,
+    maxPostAgeHours: 0,
   },
   safety: {
     minCommentDelaySec: 90,

@@ -183,8 +183,6 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity, runTok
       continue
     }
     cursors[groupId] = fresh ? null : (r.feed?.nextCursor || null)
-    const maxAgeHours = Math.max(1, Number(cfg.maxPostAgeHours || 72))
-    const oldestAllowed = Date.now() - maxAgeHours * 60 * 60 * 1000
     const posts = [...(r.feed?.posts || [])].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
     writeLog('success', `Đã tải ${posts.length} bài từ ${gi.groupName}.`, { kind: 'post', ...gi })
     for (let postNo = 0; postNo < posts.length; postNo++) {
@@ -198,10 +196,6 @@ async function scanGroups(execute, fresh = false, limitGroups = Infinity, runTok
       const ageLabel = postTime ? ` · đăng ${new Date(postTime).toLocaleString('vi')}` : ' · chưa lấy được thời gian đăng'
       writeLog('info', `Đọc bài ${postNo + 1}/${posts.length}${ageLabel}: ${clip(post.text, 110) || '(không có nội dung chữ)'}`, meta)
       if (!postId) { writeLog('info', 'Bỏ qua: Facebook không trả về ID bài viết.', meta); continue }
-      if (postTime && postTime < oldestAllowed) {
-        writeLog('info', `Bỏ qua: bài đã cũ hơn ${maxAgeHours} giờ.`, meta)
-        continue
-      }
       if (seen.has(postId)) { writeLog('info', 'Bỏ qua: bài này đã có trong hàng chờ.', meta); continue }
       if (commented.has(postId)) { writeLog('info', 'Bỏ qua: đã comment bài này trước đó.', meta); continue }
       if (!keywordOk(post.text, cfg.requiredKeywords, cfg.bannedKeywords)) {
@@ -603,7 +597,7 @@ export async function runWebCommand(payload, execute) {
     localStorage.removeItem(TASK_LEASE_KEY)
     const retainedQueue = (st.queue || []).filter(x => x.manual || x.approved)
     save({ cfg, state, queue: retainedQueue, progress: { active: true, phase: 'startup', label: retainedQueue.length ? `Đang khởi động Auto; giữ lại ${retainedQueue.length} bài thủ công/đã duyệt…` : 'Đang khởi động Auto và tìm bài mới…', current: 0, total: 0, updatedAt: Date.now() } })
-    writeLog('success', `Đã bật Auto · ${cfg.groupIds?.length || 0} nhóm mục tiêu · cap ${cfg.dailyCap || 30}/ngày · giãn cách ${cfg.minDelaySec || 90}–${cfg.maxDelaySec || 240} giây · ưu tiên bài trong ${cfg.maxPostAgeHours || 72} giờ gần nhất.`)
+    writeLog('success', `Đã bật Auto · ${cfg.groupIds?.length || 0} nhóm mục tiêu · cap ${cfg.dailyCap || 30}/ngày · giãn cách ${cfg.minDelaySec || 90}–${cfg.maxDelaySec || 240} giây · không giới hạn tuổi bài viết.`)
     await execute({ type: 'EXEC_CONFIGURE_FAILOVER', autoEnabled: true, killSwitch: false })
     setTimeout(() => runWebCommand({ type: 'AUTO_TICK' }, execute).catch(error => writeLog('error', `Auto không khởi chạy được: ${error?.message || error}`)), 0)
     return { ok: true }
