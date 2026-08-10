@@ -234,7 +234,7 @@ async function syncFacebookActivity(execute, force = false) {
   const before = load()
   if (!force && Date.now() - Number(before.activitySyncedAt || 0) < 10 * 60 * 1000) return { ok: true, skipped: true, count: 0 }
   if (!force && Date.now() < Number(before.activitySyncRetryAt || 0)) return { ok: true, skipped: true, count: 0 }
-  writeLog('info', 'Đang đồng bộ Lịch sử hoạt động trực tiếp từ Facebook…', {}, 'activity-sync', 60 * 1000)
+  if (force) writeLog('info', 'Đang đồng bộ Lịch sử hoạt động trực tiếp từ Facebook…')
   let items = [], pagesFetched = 0, successfulCategories = 0, categoryErrors = []
   try {
     for (const category of ['GROUPPOSTS', 'COMMENTS']) {
@@ -272,7 +272,7 @@ async function syncFacebookActivity(execute, force = false) {
       : `Không đồng bộ được Activity Log: ${errorText}. Auto tiếp tục dùng dữ liệu chống trùng đã lưu.`, {}, 'activity-error', incompatible ? 6 * 60 * 60 * 1000 : 10 * 60 * 1000)
     return { ok: false, error: errorText }
   }
-  if (categoryErrors.length) writeLog('info', `Một phần Activity Log chưa đọc được (${categoryErrors.join(' · ')}); dữ liệu đọc thành công vẫn được lưu.`, {}, 'activity-partial', 10 * 60 * 1000)
+  if (categoryErrors.length) writeLog('info', `Một phần Activity Log chưa đọc được (${categoryErrors.join(' · ')}); dữ liệu đọc thành công vẫn được lưu.`, {}, 'activity-partial', 6 * 60 * 60 * 1000)
   const current = load(), oldHistory = current.commentHistory || []
   const byKey = new Map(oldHistory.map(x => [`${x.kind || x.mode || ''}:${x.commentId || x.postId}:${x.time || x.createdAt || ''}`, x]))
   for (const item of items) {
@@ -295,7 +295,7 @@ async function syncFacebookActivity(execute, force = false) {
     } catch {}
   }
   save({ commentHistory: history, commentedPostIds, activitySyncedAt: Date.now(), activitySyncRetryAt: 0, activitySyncStats: { at: Date.now(), received: items.length, pages: pagesFetched, ...(serverStats || {}) } })
-  writeLog('success', `Đã đọc ${pagesFetched} trang / ${items.length} hoạt động từ Facebook${serverStats ? ` · server thêm ${serverStats.added}, cập nhật ${serverStats.updated}` : ''} · nhận diện ${commentedPostIds.length} bài cần chống trùng.`)
+  if (force || Number(serverStats?.added || 0) > 0) writeLog('success', `Đã đọc ${pagesFetched} trang / ${items.length} hoạt động từ Facebook${serverStats ? ` · server thêm ${serverStats.added}, cập nhật ${serverStats.updated}` : ''} · nhận diện ${commentedPostIds.length} bài cần chống trùng.`)
   return { ok: true, count: items.length, pages: pagesFetched, items, stats: serverStats }
 }
 
@@ -434,14 +434,15 @@ async function jobTick(execute) {
   writeLog(r?.ok ? 'success' : 'error', r?.ok
     ? `Đã xử lý thành công ${label} · tiến độ ${next.idx}/${next.total}.`
     : `Xử lý ${label} thất bại: ${r?.error || 'không rõ lỗi'} · lỗi liên tiếp ${next.consec}/3.`)
-  if (next.running) writeLog('info', `Chiến dịch chờ ${Math.max(0, Math.ceil((next.nextAt - Date.now()) / 1000))} giây trước mục tiếp theo.`)
-  else writeLog(next.consec >= 3 ? 'error' : 'success', next.consec >= 3 ? 'Chiến dịch tự dừng vì có 3 lỗi liên tiếp.' : 'Chiến dịch đã hoàn tất.')
+  if (!next.running) writeLog(next.consec >= 3 ? 'error' : 'success', next.consec >= 3 ? 'Chiến dịch tự dừng vì có 3 lỗi liên tiếp.' : 'Chiến dịch đã hoàn tất.')
   return { ok: true, result: r }
 }
 
 function migrate(legacy) {
   const current = load()
   if (current.schemaVersion) {
+    const cleanedLogs = (current.logs || []).filter(log => !/Đang chờ giãn cách an toàn|Chiến dịch chờ \d+ giây trước mục tiếp theo/i.test(String(log?.msg || '')))
+    if (cleanedLogs.length !== (current.logs || []).length) return save({ logs: cleanedLogs })
     if (!current.commentedPostIds?.length && current.commentHistory?.length) {
       return save({ commentedPostIds: [...new Set(current.commentHistory.map(x => String(x.postId)).filter(Boolean))].slice(-5000) })
     }
@@ -534,12 +535,10 @@ export async function runWebCommand(payload, execute) {
     if (!cfg.autoEnabled || cfg.killSwitch) return { ok: true, result: { skipped: 'Auto tắt' } }
     if (state.dateKey !== key) { state = { ...state, dateKey: key, doneToday: 0 }; save({ state }) }
     if (Number(state.doneToday || 0) >= Number(cfg.dailyCap || 30)) {
-      writeLog('info', `Auto tạm nghỉ: đã đạt cap ${cfg.dailyCap || 30} lượt hôm nay.`, {}, 'daily-cap', 30 * 60 * 1000)
+      writeLog('info', `Auto tạm nghỉ: đã đạt cap ${cfg.dailyCap || 30} lượt hôm nay.`, {}, `daily-cap-${key}`, 24 * 60 * 60 * 1000)
       return { ok: true, result: { skipped: 'Đạt cap ngày' } }
     }
     if (Date.now() < Number(state.nextActionAt || 0)) {
-      const sec = Math.max(1, Math.ceil((state.nextActionAt - Date.now()) / 1000))
-      writeLog('info', `Đang chờ giãn cách an toàn · còn khoảng ${sec} giây.`, {}, 'auto-wait', 60 * 1000)
       return { ok: true, result: { skipped: 'Đang chờ delay' } }
     }
     await syncFacebookActivity(execute)
@@ -548,7 +547,7 @@ export async function runWebCommand(payload, execute) {
     const item = cfg.requireApproval ? queue.find(x => x.approved) : queue[0]
     if (!item) {
       const reason = queue.length ? 'Hàng chờ đang đợi user duyệt.' : 'Chu kỳ này không tìm thấy bài phù hợp.'
-      writeLog('info', reason, {}, queue.length ? 'await-approval' : 'no-candidate', 2 * 60 * 1000)
+      writeLog('info', reason, {}, queue.length ? 'await-approval' : 'no-candidate', 15 * 60 * 1000)
       return { ok: true, result: { skipped: queue.length ? 'Chờ duyệt' : 'Không có bài phù hợp' } }
     }
     const result = await postQueueItem(item.postId, execute); return { ok: result.ok, result, error: result.error }
