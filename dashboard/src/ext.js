@@ -25,6 +25,12 @@ function versionAtLeast(current, required) {
   }
   return true
 }
+const NEEDS_CURRENT_EXTENSION = new Set([
+  'START_AUTO', 'AUTO_TICK', 'SCAN_NOW', 'STEP_NOW', 'POST_ITEM', 'START_JOB', 'JOB_TICK',
+  'LIST_PAGE_POSTS', 'SCAN_PAGES', 'ADD_PAGE_POSTS_TO_QUEUE', 'SYNC_FACEBOOK_ACTIVITY',
+  'SEARCH_GROUPS', 'SEARCH_PAGES', 'LOAD_JOINED_GROUPS', 'JOIN_GROUP', 'LEAVE_GROUP',
+  'LIST_POST_COMMENTS', 'HIDE_COMMENT', 'MAKE_LINKS', 'TEST_SHOPEE_SEARCH',
+])
 
 function sendSignal(payload, timeoutMs = 20000) {
   return new Promise((resolve) => {
@@ -47,7 +53,7 @@ function sendSignal(payload, timeoutMs = 20000) {
 
 export async function ext(payload, timeoutMs = 20000) {
   try {
-    if (payload?.type === 'START_AUTO' && !versionAtLeast(_extensionVersion, '1.5.3')) {
+    if (NEEDS_CURRENT_EXTENSION.has(payload?.type) && !versionAtLeast(_extensionVersion, '1.5.3')) {
       return { ok: false, error: `Extension ${_extensionVersion || 'không xác định'} đã cũ. Hãy cập nhật/reload ToolMKT AI v1.5.3 trở lên trước khi bật Auto.` }
     }
     const handled = await runWebCommand(payload, sendSignal)

@@ -1,5 +1,6 @@
 const STORE_KEY = 'toolmkt_web_state_v15'
 const POST_LOCK_KEY = 'toolmkt_web_post_locks_v15'
+const TASK_LEASE_KEY = 'toolmkt_web_task_lease_v15'
 let executorCfg = {}
 const OWNED_KEYS = [
   'cfg', 'catalog', 'discoveredGroups', 'groupsSyncedAt', 'searchResults', 'searchAt',
@@ -21,8 +22,30 @@ const lastLogAt = new Map()
 const postingPostIds = new Set()
 const controllerInstanceId = id('tab')
 let autoTickRunning = false
+let webCancelGeneration = 0
+function acquireTaskLease(kind, ttlMs = 6 * 60 * 1000) {
+  const now = Date.now()
+  let lease = null
+  try { lease = JSON.parse(localStorage.getItem(TASK_LEASE_KEY) || 'null') } catch {}
+  if (lease && Number(lease.expiresAt || 0) > now) return false
+  localStorage.setItem(TASK_LEASE_KEY, JSON.stringify({ owner: controllerInstanceId, kind, expiresAt: now + ttlMs }))
+  try { return JSON.parse(localStorage.getItem(TASK_LEASE_KEY) || 'null')?.owner === controllerInstanceId } catch { return false }
+}
+function releaseTaskLease() {
+  try {
+    const lease = JSON.parse(localStorage.getItem(TASK_LEASE_KEY) || 'null')
+    if (lease?.owner === controllerInstanceId) localStorage.removeItem(TASK_LEASE_KEY)
+  } catch {}
+}
+async function withTaskLease(kind, fn) {
+  if (!acquireTaskLease(kind)) return { ok: false, error: 'Một tab/tác vụ khác đang sử dụng Facebook. Hãy chờ tác vụ hiện tại hoàn tất.' }
+  const labels = { 'search-groups': 'Đang tìm nhóm trên Facebook…', 'search-pages': 'Đang tìm Fanpage trên Facebook…' }
+  if (labels[kind]) setProgress('search', labels[kind])
+  try { return await fn() } finally { if (labels[kind]) clearProgress('Đã kết thúc tác vụ.'); releaseTaskLease() }
+}
 function autoRunActive(token) {
   if (!token) return true
+  if (String(token).startsWith('manual:')) return Number(String(token).slice(7)) === webCancelGeneration
   const st = load()
   return st.cfg?.autoEnabled && !st.cfg?.killSwitch && st.state?.autoRunToken === token
 }
@@ -360,11 +383,6 @@ async function postQueueItem(postId, execute, runToken = '') {
   let r
   try {
     r = await execute({ type: 'EXEC_POST_COMMENT', item, message: item.comment, useConfiguredMedia: item.mode === 'social' }, 240000)
-    const mediaAttached = item.mode === 'social' && (cfg.commentImageBase64 || cfg.commentVideoKey)
-    if (!r?.ok && mediaAttached && /upload|ảnh|photo|video/i.test(String(r?.error || ''))) {
-      writeLog('info', 'Facebook từ chối media đính kèm; đang thử lại một lần bằng comment chữ để không bỏ lỡ bài.', targetMeta)
-      r = await execute({ type: 'EXEC_POST_COMMENT', item, message: item.comment, imageBase64: '', videoKey: '' }, 240000)
-    }
   } catch (error) {
     r = { ok: false, error: String(error?.message || error) }
   } finally {
@@ -403,19 +421,24 @@ async function postQueueItem(postId, execute, runToken = '') {
     }
     return r
   }
-  queue.splice(at, 1); const history = [{ ...item, time: Date.now() }, ...(st.commentHistory || [])].slice(0, 500)
+  queue.splice(at, 1)
   const commentedPostIds = [...new Set([...(st.commentedPostIds || []).map(String), postKey])].slice(-5000)
   let state = st.state || {}; const key = todayKey(); if (state.dateKey !== key) state = { ...state, dateKey: key, doneToday: 0 }
   const lo = Math.max(90, Number(st.cfg?.minDelaySec || 90)), hi = Math.max(lo, Number(st.cfg?.maxDelaySec || lo))
   state = { ...state, doneToday: Number(state.doneToday || 0) + 1, consecutivePostErrors: 0, nextActionAt: Date.now() + (lo + Math.floor(Math.random() * (hi - lo + 1))) * 1000 }
-  save({ queue, commentHistory: history, commentedPostIds, state, stats: { ...(st.stats || {}), totalCommented: Number(st.stats?.totalCommented || 0) + 1, lastRunAt: Date.now(), lastError: '' } })
+  // Lịch sử hiển thị chỉ đến từ Facebook Activity Log. commentedPostIds vẫn
+  // được lưu cục bộ để chống đăng trùng ngay trước lần đồng bộ tiếp theo.
+  save({ queue, commentedPostIds, state, stats: { ...(st.stats || {}), totalCommented: Number(st.stats?.totalCommented || 0) + 1, lastRunAt: Date.now(), lastError: '' } })
   const waitSec = Math.max(0, Math.ceil((state.nextActionAt - Date.now()) / 1000))
   if (autoRunActive(runToken)) setProgress('waiting', `Comment thành công tại ${targetName}. Lượt tiếp theo sau khoảng ${waitSec} giây.`)
   writeLog('success', `Đã comment thành công tại ${targetName} · lần tiếp theo sau khoảng ${waitSec} giây.`, {
     ...targetMeta, tag: item.isPage ? 'Comment Page' : (item.mode === 'social' ? 'Comment dạo' : 'Rải link'),
     link: r?.result?.permalink || item.permalink || targetMeta.link,
   })
-  await usage('POST')
+  const quotaRecorded = await usage('POST')
+  if (!quotaRecorded?.ok) {
+    writeLog('error', 'Comment đã đăng thành công nhưng chưa ghi nhận được hạn mức hệ thống. Không tự gửi lại để tránh tính trùng; vui lòng kiểm tra kết nối.', targetMeta, `quota-sync-${postKey}`, 60 * 60 * 1000)
+  }
   await serverLock(serverTargetKey, false)
   return { ok: true, result: r.result }
 }
@@ -431,6 +454,7 @@ async function jobTick(execute) {
   }
   const i = job.idx, target = job.items[i]; let r, postFingerprint = ''
   const label = job.results?.[i]?.name || String(target)
+  save({ job: { ...job, results: job.results.map((x, n) => n === i ? { ...x, status: 'posting', error: '' } : x) } })
   writeLog('info', `Chiến dịch ${job.kind}: đang xử lý ${i + 1}/${job.total} · ${label}.`)
   if (job.kind === 'comment') r = await postQueueItem(target, execute)
   else if (job.kind === 'join') r = await execute({ type: 'EXEC_JOIN_GROUP', groupId: target }, 120000)
@@ -457,6 +481,11 @@ async function jobTick(execute) {
         await serverLock(postFingerprint, false)
       }
     }
+  }
+  const latestJob = load().job
+  if (!latestJob?.running || latestJob.runToken !== job.runToken) {
+    writeLog('info', `Đã dừng chiến dịch sau tác vụ hiện tại · không chạy mục tiếp theo.`)
+    return { ok: true, result: r, stopped: true }
   }
   const results = job.results.map((x, n) => n === i ? { ...x, status: r?.ok ? 'success' : 'error', error: r?.error || '', url: r?.postUrl || r?.result?.postUrl || x.url } : x)
   const lo = Math.max(20, Number(job.delayMin || 90)), hi = Math.max(lo, Number(job.delayMax || lo))
@@ -505,6 +534,7 @@ function mergedState(legacy) {
 }
 
 async function searchMany(raw, execute, action, resultKey, cursorKey, more) {
+  const cancelAtStart = webCancelGeneration
   const st = load()
   const keywords = more ? (st[resultKey === 'groups' ? 'searchKeywords' : 'pageSearchKeywords'] || [])
     : String(raw || '').split(',').map(x => x.trim()).filter(Boolean)
@@ -514,8 +544,10 @@ async function searchMany(raw, execute, action, resultKey, cursorKey, more) {
   const byId = new Map(existing.map(x => [String(x.groupId || x.pageId), x]))
   const cursors = { ...oldCursors }
   for (const keyword of keywords) {
+    if (cancelAtStart !== webCancelGeneration) return cancelledResult()
     if (more && keyword in oldCursors && !oldCursors[keyword]) continue
     const r = await execute({ type: action, keyword, cursor: more ? oldCursors[keyword] : null }, 120000)
+    if (cancelAtStart !== webCancelGeneration) return cancelledResult()
     if (!r?.ok) return r
     for (const item of (r[resultKey] || [])) byId.set(String(item.groupId || item.pageId), item)
     cursors[keyword] = r.nextCursor || null
@@ -538,9 +570,23 @@ export async function runWebCommand(payload, execute) {
   if (type === 'GET_GROUPS') { const st = load(); return { ok: true, groups: st.discoveredGroups || [], syncedAt: st.groupsSyncedAt || 0 } }
   if (type === 'CLEAR_POSTED') { save({ commentHistory: [] }); return { ok: true } }
   if (type === 'CLEAR_LOGS') { save({ logs: [] }); return { ok: true } }
-  if (type === 'SYNC_FACEBOOK_ACTIVITY') return syncFacebookActivity(execute, true)
+  if (type === 'SYNC_FACEBOOK_ACTIVITY') {
+    if (!acquireTaskLease('activity')) return { ok: false, error: 'Một tác vụ Facebook khác đang chạy. Hãy thử đồng bộ lại sau.' }
+    setProgress('activity', 'Đang đọc Lịch sử hoạt động trực tiếp từ Facebook…')
+    try { return await syncFacebookActivity(execute, true) } finally { clearProgress('Đã kết thúc đồng bộ Activity Log.'); releaseTaskLease() }
+  }
+  if (type === 'CANCEL_RUN') {
+    webCancelGeneration++
+    clearProgress('Đã dừng tác vụ theo yêu cầu.')
+    await execute(payload)
+    return { ok: true }
+  }
   if (type === 'RESET_HISTORY') { save({ commentHistory: [], queue: [] }); return { ok: true } }
-  if (type === 'SCAN_NOW') { await syncFacebookActivity(execute); return scanGroups(execute, true) }
+  if (type === 'SCAN_NOW') {
+    if (!acquireTaskLease('scan')) return { ok: false, error: 'Một tab khác đang sử dụng Facebook. Hãy chờ tác vụ hiện tại hoàn tất.' }
+    const token = `manual:${webCancelGeneration}`
+    try { return await scanGroups(execute, true, Infinity, token) } finally { releaseTaskLease() }
+  }
   if (type === 'POST_ITEM') return postQueueItem(payload.postId, execute)
   if (type === 'STEP_NOW') {
     const q = load().queue || []; if (!q.length) await scanGroups(execute, true, 1)
@@ -552,7 +598,8 @@ export async function runWebCommand(payload, execute) {
     const cfg = { ...(st.cfg || {}), autoEnabled: true, killSwitch: false }
     const state = { ...(st.state || {}), nextActionAt: 0, consecutivePostErrors: 0, autoRunToken: id('run') }
     localStorage.removeItem(POST_LOCK_KEY)
-    save({ cfg, state, queue: [], progress: { active: true, phase: 'startup', label: 'Đang khởi động Auto, bỏ hàng chờ cũ và tìm bài mới…', current: 0, total: 0, updatedAt: Date.now() } })
+    const retainedQueue = (st.queue || []).filter(x => x.manual || x.approved)
+    save({ cfg, state, queue: retainedQueue, progress: { active: true, phase: 'startup', label: retainedQueue.length ? `Đang khởi động Auto; giữ lại ${retainedQueue.length} bài thủ công/đã duyệt…` : 'Đang khởi động Auto và tìm bài mới…', current: 0, total: 0, updatedAt: Date.now() } })
     writeLog('success', `Đã bật Auto · ${cfg.groupIds?.length || 0} nhóm mục tiêu · cap ${cfg.dailyCap || 30}/ngày · giãn cách ${cfg.minDelaySec || 90}–${cfg.maxDelaySec || 240} giây · ưu tiên bài trong ${cfg.maxPostAgeHours || 72} giờ gần nhất.`)
     await execute({ type: 'EXEC_CONFIGURE_FAILOVER', autoEnabled: true, killSwitch: false })
     setTimeout(() => runWebCommand({ type: 'AUTO_TICK' }, execute).catch(error => writeLog('error', `Auto không khởi chạy được: ${error?.message || error}`)), 0)
@@ -567,6 +614,7 @@ export async function runWebCommand(payload, execute) {
   }
   if (type === 'AUTO_TICK') {
     if (autoTickRunning) return { ok: true, result: { skipped: 'Một lượt Auto khác đang xử lý' } }
+    if (!acquireTaskLease('auto')) return { ok: true, result: { skipped: 'Một tab khác đang điều khiển Auto' } }
     autoTickRunning = true
     try {
     const st = load(), cfg = st.cfg || {}; let state = st.state || {}, key = todayKey()
@@ -595,7 +643,7 @@ export async function runWebCommand(payload, execute) {
     }
     const result = await postQueueItem(item.postId, execute, runToken)
     return { ok: result.ok, result, error: result.error }
-    } finally { autoTickRunning = false }
+    } finally { autoTickRunning = false; releaseTaskLease() }
   }
   if (type === 'START_JOB') {
     if (!['comment', 'join', 'postgroup'].includes(payload.kind)) return { ok: false, error: 'Loại chiến dịch không hợp lệ' }
@@ -604,7 +652,7 @@ export async function runWebCommand(payload, execute) {
     if (!items.length) return { ok: false, error: 'Không có mục để chạy' }
     const old = load().job; if (old?.running) return { ok: false, error: 'Đang có chiến dịch chạy' }
     const params = payload.params || {}, delayMin = Math.max(payload.kind === 'join' ? 20 : 90, Number(params.delayMin || 90))
-    const job = { running: true, paused: false, kind: payload.kind, items, idx: 0, total: items.length, params, delayMin, delayMax: Math.max(delayMin, Number(params.delayMax || delayMin)), nextAt: 0, consec: 0, startedAt: Date.now(), results: items.map(x => ({ id: x, name: String(x), status: 'pending', error: '' })) }
+    const job = { running: true, paused: false, runToken: id('job'), kind: payload.kind, items, idx: 0, total: items.length, params, delayMin, delayMax: Math.max(delayMin, Number(params.delayMax || delayMin)), nextAt: 0, consec: 0, startedAt: Date.now(), results: items.map(x => ({ id: x, name: String(x), status: 'pending', error: '' })) }
     save({ job })
     writeLog('success', `Bắt đầu chiến dịch ${payload.kind} · ${items.length} mục · giãn cách ${delayMin}–${job.delayMax} giây.`)
     setTimeout(() => { jobTick(execute).catch(error => {
@@ -612,12 +660,15 @@ export async function runWebCommand(payload, execute) {
       save({ job: { ...(load().job || job), running: false, stoppedMsg: String(error?.message || error) } })
     }) }, 0); return { ok: true, job }
   }
-  if (type === 'JOB_TICK') return jobTick(execute)
+  if (type === 'JOB_TICK') {
+    if (!acquireTaskLease('job')) return { ok: true, result: { skipped: 'Một tab khác đang chạy chiến dịch' } }
+    try { return await jobTick(execute) } finally { releaseTaskLease() }
+  }
   if (type === 'JOB_STOP' || type === 'JOB_PAUSE' || type === 'JOB_RESUME' || type === 'JOB_SKIP_WAIT' || type === 'JOB_CLEAR') {
     const job = load().job
     if (type === 'JOB_CLEAR' && !job?.running) { save({ job: null }); return { ok: true } }
     if (!job) return { ok: true }
-    const patch = type === 'JOB_STOP' ? { running: false, paused: false, stoppedMsg: 'Đã dừng theo yêu cầu.' }
+    const patch = type === 'JOB_STOP' ? { running: false, paused: false, runToken: id('stopped_job'), results: (job.results || []).map(x => x.status === 'posting' ? { ...x, status: 'skipped', error: 'Đã dừng sau tác vụ hiện tại' } : x), stoppedMsg: 'Đã dừng theo yêu cầu.' }
       : type === 'JOB_PAUSE' ? { paused: true }
       : type === 'JOB_RESUME' ? { paused: false }
       : type === 'JOB_SKIP_WAIT' ? { nextAt: 0 } : {}
@@ -666,12 +717,16 @@ export async function runWebCommand(payload, execute) {
   }
   if (type === 'SET_TARGET_PAGES') { save({ targetPages: payload.pages || [] }); return execute(payload) }
   if (type === 'LOAD_JOINED_GROUPS' || type === 'DISCOVER_GROUPS') {
+    if (!acquireTaskLease('joined-groups')) return { ok: false, error: 'Một tác vụ Facebook khác đang chạy.' }
+    setProgress('discover', 'Đang tải danh sách nhóm đã tham gia từ Facebook…')
+    try {
     const r = await execute({ type: 'EXEC_GET_JOINED_GROUPS', opts: payload.opts || {} }, 180000)
     if (r?.ok) {
       save({ discoveredGroups: r.groups || [], groupsSyncedAt: Date.now() })
       await execute({ type: 'RESTORE_GROUPS', snapshot: { discoveredGroups: r.groups || [], groupsSyncedAt: Date.now() } })
     }
     return { ...r, count: r?.groups?.length || 0 }
+    } finally { clearProgress('Đã kết thúc tải danh sách nhóm.'); releaseTaskLease() }
   }
   if (type === 'SCORE_GROUPS') {
     const st = load(), groups = st.discoveredGroups || []
@@ -682,11 +737,11 @@ export async function runWebCommand(payload, execute) {
   if (type === 'SUGGEST_NICHES') {
     const keywords = await ai('suggestNiches', { catalog: load().catalog || [] }); return { ok: true, keywords }
   }
-  if (type === 'SEARCH_GROUPS') return searchMany(payload.keyword, execute, 'EXEC_SEARCH_GROUPS', 'groups', 'searchCursors', !!payload.more)
-  if (type === 'SEARCH_PAGES') return searchMany(payload.keyword, execute, 'EXEC_SEARCH_PAGES', 'pages', 'pageSearchCursors', !!payload.more)
-  if (type === 'JOIN_GROUP') return execute({ type: 'EXEC_JOIN_GROUP', groupId: payload.groupId }, 60000)
+  if (type === 'SEARCH_GROUPS') return withTaskLease('search-groups', () => searchMany(payload.keyword, execute, 'EXEC_SEARCH_GROUPS', 'groups', 'searchCursors', !!payload.more))
+  if (type === 'SEARCH_PAGES') return withTaskLease('search-pages', () => searchMany(payload.keyword, execute, 'EXEC_SEARCH_PAGES', 'pages', 'pageSearchCursors', !!payload.more))
+  if (type === 'JOIN_GROUP') return withTaskLease('join-group', () => execute({ type: 'EXEC_JOIN_GROUP', groupId: payload.groupId }, 60000))
   if (type === 'LEAVE_GROUP') {
-    const r = await execute({ type: 'EXEC_LEAVE_GROUP', groupId: payload.groupId }, 60000)
+    const r = await withTaskLease('leave-group', () => execute({ type: 'EXEC_LEAVE_GROUP', groupId: payload.groupId }, 60000))
     if (r?.ok) {
       const st = load(), gid = String(payload.groupId)
       save({ discoveredGroups: (st.discoveredGroups || []).filter(x => String(x.groupId) !== gid), cfg: { ...(st.cfg || {}), groupIds: (st.cfg?.groupIds || []).filter(x => String(x) !== gid) } })
@@ -694,16 +749,26 @@ export async function runWebCommand(payload, execute) {
     return r
   }
   if (type === 'LIST_PAGE_POSTS') {
+    if (!acquireTaskLease('page-posts')) return { ok: false, error: 'Một tác vụ Facebook khác đang chạy.' }
+    try {
     const pages = payload.pages?.length ? payload.pages : (load().targetPages || []), posts = []
-    for (const page of pages) {
+    for (let pageNo = 0; pageNo < pages.length; pageNo++) {
+      const page = pages[pageNo]
+      setProgress('scan', `Đang đọc bài từ Fanpage ${page.name || page.pageId}…`, pageNo + 1, pages.length)
       const r = await execute({ type: 'EXEC_FETCH_PAGE_FEED', pageId: page.pageId, count: payload.count || 8 }, 120000)
       if (r?.ok) for (const p of (r.feed?.posts || [])) posts.push({ ...p, pageId: String(page.pageId), pageName: page.name || '' })
     }
     return { ok: true, posts }
+    } finally { clearProgress('Đã kết thúc đọc bài Fanpage.'); releaseTaskLease() }
   }
   if (type === 'SCAN_PAGES') {
+    if (!acquireTaskLease('scan-pages')) return { ok: false, error: 'Một tác vụ Facebook khác đang chạy.' }
+    try {
     const st = load(), cfg = st.cfg || {}, queue = [...(st.queue || [])], seen = new Set(queue.map(x => String(x.postId))), commented = new Set((st.commentHistory || []).map(x => String(x.postId))); let added = 0, firstError = null
-    for (const page of (st.targetPages || [])) {
+    const pages = st.targetPages || []
+    for (let pageNo = 0; pageNo < pages.length; pageNo++) {
+      const page = pages[pageNo]
+      setProgress('scan', `Đang quét và phân tích bài tại ${page.name || page.pageId}…`, pageNo + 1, pages.length)
       const r = await execute({ type: 'EXEC_FETCH_PAGE_FEED', pageId: page.pageId, count: cfg.postsPerScan || 5 }, 120000)
       if (!r?.ok) { firstError ||= r?.error || 'Không đọc được feed Page'; continue }
       for (const post of (r.feed?.posts || [])) {
@@ -716,6 +781,7 @@ export async function runWebCommand(payload, execute) {
       }
     }
     save({ queue }); if (!added && firstError) return { ok: false, error: firstError, queued: 0 }; return { ok: true, queued: added }
+    } finally { clearProgress('Đã kết thúc quét Fanpage.'); releaseTaskLease() }
   }
   if (type === 'ADD_PAGE_POSTS_TO_QUEUE') {
     const st = load(), queue = [...(st.queue || [])], seen = new Set(queue.map(x => String(x.postId))); let added = 0
@@ -724,10 +790,10 @@ export async function runWebCommand(payload, execute) {
     }
     save({ queue }); return { ok: true, added }
   }
-  if (type === 'LIST_POST_COMMENTS') return execute({ type: 'EXEC_LIST_COMMENTS', postId: payload.postId, cursor: payload.cursor }, 60000)
-  if (type === 'HIDE_COMMENT') return execute({ type: 'EXEC_HIDE_COMMENT', commentId: payload.commentId }, 30000)
-  if (type === 'MAKE_LINKS') return execute({ type: 'EXEC_MAKE_AFFILIATE_LINKS', links: payload.links, subId: payload.subId }, 120000)
-  if (type === 'TEST_SHOPEE_SEARCH') return execute({ type: 'EXEC_SEARCH_SHOPEE', keyword: payload.keyword, limit: payload.limit, focus: payload.focus }, 60000)
+  if (type === 'LIST_POST_COMMENTS') return withTaskLease('comments', () => execute({ type: 'EXEC_LIST_COMMENTS', postId: payload.postId, cursor: payload.cursor }, 60000))
+  if (type === 'HIDE_COMMENT') return withTaskLease('hide-comment', () => execute({ type: 'EXEC_HIDE_COMMENT', commentId: payload.commentId }, 30000))
+  if (type === 'MAKE_LINKS') return withTaskLease('affiliate', () => execute({ type: 'EXEC_MAKE_AFFILIATE_LINKS', links: payload.links, subId: payload.subId }, 120000))
+  if (type === 'TEST_SHOPEE_SEARCH') return withTaskLease('shopee-search', () => execute({ type: 'EXEC_SEARCH_SHOPEE', keyword: payload.keyword, limit: payload.limit, focus: payload.focus }, 60000))
 
   const listOps = {
     SAVE_GROUP_LIST: ['savedGroupLists', { id: id('gl'), name: payload.name || 'Danh sách', groupIds: [...new Set(payload.groupIds || [])], createdAt: Date.now() }],
