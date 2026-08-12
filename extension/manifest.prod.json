@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ToolMKT AI — Tìm khách hàng trên Facebook",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "description": "Trợ lý AI giúp tìm và phân tích bài đăng, nhóm Facebook có khách hàng tiềm năng; gợi ý nội dung tương tác phù hợp.",
   "icons": {
     "16": "icons/icon16.png",
@@ -39,11 +39,13 @@
     "https://shopee.vn/*",
     "https://s.shopee.vn/*",
     "https://affiliate.shopee.vn/*",
-    "https://toolmktai.com/*"
+    "https://toolmktai.com/*",
+    "https://*.toolmktai.com/*"
   ],
   "externally_connectable": {
     "matches": [
-      "https://toolmktai.com/*"
+      "https://toolmktai.com/*",
+      "https://*.toolmktai.com/*"
     ]
   },
   "content_scripts": [
@@ -64,7 +66,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://toolmktai.com/app*"],
+      "matches": ["https://toolmktai.com/*", "https://*.toolmktai.com/*"],
       "js": ["dashboard_bridge.js"],
       "run_at": "document_start"
     }

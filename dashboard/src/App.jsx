@@ -182,9 +182,9 @@ export default function App() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-5 px-6 text-center">
         <LogoMark size={64} />
-        <div className="text-xl font-extrabold text-slate-100 tracking-tight">Chưa cài đặt extension cầu nối</div>
+        <div className="text-xl font-extrabold text-slate-100 tracking-tight">Chưa kết nối được extension cầu nối</div>
         <div className="max-w-md text-sm leading-relaxed text-slate-400">
-          Không tìm thấy extension <b>ToolMKT AI</b> trên trình duyệt của bạn. Hãy cài đặt extension để bắt đầu tự động hóa Facebook.
+          Web chưa nhận được phản hồi từ <b>ToolMKT AI</b>. Extension có thể chưa cài, đang tắt, hoặc chưa được cấp quyền truy cập trang ToolMKT.
         </div>
         <div className="flex flex-wrap items-center justify-center gap-3">
           <a href="https://chromewebstore.google.com/detail/mocolnncfiogaiiijfkjnoggmeplbfel" target="_blank" rel="noreferrer"
@@ -197,7 +197,7 @@ export default function App() {
           </a>
         </div>
         <div className="max-w-md text-xs leading-relaxed text-slate-500 bg-slate-900/30 border border-slate-800/60 p-4 rounded-2xl">
-          Đã cài rồi? Hãy đảm bảo bạn đã bật Extension trên Chrome, sau đó bấm <b>F5 (Tải lại)</b> trang này.
+          Đã cài rồi? Mở <b>Chi tiết extension → Quyền truy cập trang web</b>, cho phép trên <b>toolmktai.com</b> (hoặc “Trên tất cả trang web”), sau đó reload extension và bấm <b>Ctrl + F5</b>.
         </div>
       </div>
     )

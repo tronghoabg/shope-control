@@ -1854,6 +1854,13 @@ chrome.alarms.onAlarm.addListener(async (a) => {
   else if (a.name === JOB_ALARM) { try { if (!(await webLeaseActive())) await jobStep(); } catch (e) { console.warn(e); } }
 });
 
+// Tự bơm lại bridge khi tab ToolMKT đã mở trước lúc cài/reload extension.
+// Static content_scripts không được Chrome tự chèn vào các tab đã tồn tại.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete' || !/^https:\/\/(?:[^/]+\.)?toolmktai\.com\//i.test(String(tab?.url || ''))) return;
+  chrome.scripting.executeScript({ target: { tabId }, files: ['dashboard_bridge.js'] }).catch(() => {});
+});
+
 async function ensureWebRuntimeTab(cfg = {}) {
   const base = String(cfg.webBase || 'https://toolmktai.com').replace(/\/$/, '');
   const matches = await chrome.tabs.query({ url: [base + '/app*', base + '/app/*'] });

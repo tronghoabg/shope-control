@@ -2,6 +2,12 @@
 // Nhờ vậy app React không cần biết extension ID.
 'use strict';
 
+const BRIDGE_INSTANCE_KEY = '__toolmktDashboardBridge156';
+if (globalThis[BRIDGE_INSTANCE_KEY]) {
+  try { window.postMessage({ __shopeReady: true, version: chrome.runtime.getManifest().version }, '*'); } catch {}
+} else {
+globalThis[BRIDGE_INSTANCE_KEY] = true;
+
 // Context còn sống không? (sau khi reload extension, content script cũ bị vô hiệu → mọi chrome.* ném lỗi)
 function alive() {
   try { return !!(chrome && chrome.runtime && chrome.runtime.id); } catch { return false; }
@@ -47,3 +53,4 @@ window.addEventListener('message', onMsg);
 try {
   if (alive()) window.postMessage({ __shopeReady: true, version: chrome.runtime.getManifest().version }, '*');
 } catch {}
+}
