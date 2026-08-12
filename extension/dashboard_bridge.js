@@ -12,7 +12,14 @@ function reply(id, res) {
 }
 
 function onMsg(e) {
-  if (e.source !== window || !e.data || e.data.__shopeReq !== true) return;
+  if (e.source !== window || !e.data) return;
+  // Web có thể tải sau content script và bỏ lỡ tín hiệu ready đầu tiên.
+  // Trả lời probe giúp nhận diện extension ổn định trên tab/máy mới.
+  if (e.data.__shopeProbe === true) {
+    if (alive()) window.postMessage({ __shopeReady: true, version: chrome.runtime.getManifest().version }, '*');
+    return;
+  }
+  if (e.data.__shopeReq !== true) return;
   const { id, payload } = e.data;
 
   // Context đã chết → trả lỗi nhẹ + GỠ listener để bản mồ côi ngừng bắn lỗi.

@@ -15,6 +15,17 @@ window.addEventListener('message', (e) => {
   }
 })
 
+// Chủ động hỏi bridge nhiều lần: khắc phục race khi content script và bundle web
+// tải theo thứ tự khác nhau trên máy mới hoặc sau khi extension vừa reload.
+if (typeof window !== 'undefined') {
+  window.postMessage({ __shopeProbe: true }, '*')
+  let probeCount = 0
+  const probeTimer = setInterval(() => {
+    if (_ready || ++probeCount >= 12) return clearInterval(probeTimer)
+    window.postMessage({ __shopeProbe: true }, '*')
+  }, 500)
+}
+
 export function extReady() { return _ready }
 export function extensionVersion() { return _extensionVersion }
 function versionAtLeast(current, required) {
@@ -53,8 +64,8 @@ function sendSignal(payload, timeoutMs = 20000) {
 
 export async function ext(payload, timeoutMs = 20000) {
   try {
-    if (NEEDS_CURRENT_EXTENSION.has(payload?.type) && !versionAtLeast(_extensionVersion, '1.5.4')) {
-      return { ok: false, error: `Extension ${_extensionVersion || 'không xác định'} đã cũ. Hãy cập nhật/reload ToolMKT AI v1.5.4 trở lên trước khi bật Auto.` }
+    if (NEEDS_CURRENT_EXTENSION.has(payload?.type) && !versionAtLeast(_extensionVersion, '1.5.5')) {
+      return { ok: false, error: `Extension ${_extensionVersion || 'không xác định'} đã cũ. Hãy cập nhật/reload ToolMKT AI v1.5.5 trở lên trước khi bật Auto.` }
     }
     const handled = await runWebCommand(payload, sendSignal)
     return handled === null ? sendSignal(payload, timeoutMs) : handled
